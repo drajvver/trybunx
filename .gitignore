@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+output/
+tests/fixtures/e2e_output/
+tests/fixtures/synthetic_match.mp4
+tests/fixtures/synthetic_match.truth.json
+tests/fixtures/e2e_output
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+python/vendor/

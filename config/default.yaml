@@ -1,0 +1,51 @@
+# TrybunaTV AI Clip Hunter - default configuration (PRD section 26)
+# All detection thresholds and timing parameters can be tuned here without
+# touching application source code.
+
+analysis:
+  ocr_interval_ms: 1000          # coarse scoreboard sampling interval
+  fine_ocr_interval_ms: 200      # fine scan sampling around candidate changes
+  fine_scan_margin_seconds: 2    # extra context around a candidate window
+  event_window_seconds: 8        # signal clustering window
+  refine_change_times: true      # use fine scans to refine change timestamps
+
+ocr:
+  confirmation_reads: 3          # repeated reads required to accept a score
+  confirmation_window_seconds: 3 # reads must happen within this window
+  upscale: 3                     # ROI upscale factor applied by ffmpeg
+  min_confidence: 0.35           # discard OCR reads below this confidence
+  max_reasonable_score: 30       # scores above this are treated as OCR noise
+  worker_batch_size: 64          # frames per Python worker request
+
+audio:
+  enabled: true
+  sample_rate: 16000             # analysis audio: 16 kHz mono PCM
+  rms_window_ms: 200             # analysis window size
+  baseline_seconds: 10           # rolling baseline length
+  spike_threshold_db: 8.0        # delta above baseline that counts as a spike
+  spike_cooldown_seconds: 1.5    # minimum spacing between reported spikes
+  silence_floor_db: -55          # ignore spikes below this absolute level
+
+goal_detection:
+  audio_lookback_seconds: 12     # search audio this far before a score change
+  fallback_offset_seconds: 4     # event_time = change_time - offset when no peak
+  dedup_seconds: 20              # dedup window for identical transitions
+  peak_metric: rms               # rms | delta - metric for strongest peak
+  strong_spike_threshold_db: 8.0 # peak must exceed this to refine timing
+  confidence_weights:
+    score_change: 0.70
+    audio_spike: 0.15
+    keyword: 0.10
+    agreeing_signals: 0.05
+
+clips:
+  goal_pre_roll_seconds: 14
+  goal_post_roll_seconds: 12
+  max_clip_seconds: 30
+  create_clips_for_unknown: false # UNKNOWN_INTERESTING events get no clips in v0.1
+  encoding: reencode              # reencode = accurate cuts (preferred); copy = fast
+  video_crf: 23
+  video_preset: veryfast
+
+output:
+  dir: output

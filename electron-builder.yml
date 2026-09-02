@@ -1,0 +1,37 @@
+appId: tv.trybuna.clip-hunter
+productName: TrybunaTV AI Clip Hunter
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# extraResources stay OUTSIDE app.asar (plain files in Contents/Resources),
+# which keeps the python worker + vendored deps executable.
+extraResources:
+  - from: python
+    to: python
+    filter:
+      - "**/*"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+  - from: config
+    to: config
+asar: true
+mac:
+  # Unsigned local build: right-click -> Open (or `xattr -cr` on the .app)
+  # on first launch. Set CSC_LINK/CSC_KEY_PASSWORD to sign.
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.video
+  identity: null
+linux:
+  target:
+    - AppImage
+  category: Video
+win:
+  target:
+    - nsis

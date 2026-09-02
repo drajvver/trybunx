@@ -1,0 +1,55 @@
+{
+  "name": "trybunx-clip-hunter",
+  "productName": "TrybunaTV AI Clip Hunter",
+  "version": "0.1.0",
+  "description": "Automatic highlight extraction from football broadcast VOD files",
+  "main": "out/main/index.js",
+  "author": "TrybunaTV",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:root": "electron-vite dev -- --no-sandbox",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "npm run build && bash scripts/run_ui_smoke.sh",
+    "analyze": "tsx src/main/cli.ts",
+    "benchmark": "tsx scripts/benchmark.ts",
+    "synthetic:make": "tsx scripts/make_synthetic_match.ts",
+    "python:setup": "bash python/setup.sh",
+    "python:setup:portable": "bash python/setup.sh --portable",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:linux": "electron-vite build && electron-builder --linux",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "playwright": "^1.62.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "yaml": "^2.6.1"
+  },
+  "allowScripts": {
+    "electron": true,
+    "electron-builder": true,
+    "esbuild": true,
+    "esbuild@0.21.5": true,
+    "esbuild@0.28.2": true,
+    "tsx": true,
+    "tsx@4.23.13": true
+  }
+}
