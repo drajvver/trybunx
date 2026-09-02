@@ -94,7 +94,7 @@ export class PythonWorker {
         child.kill('SIGTERM')
         throw new Error(
           `OCR worker failed to initialize: ${(err as Error).message}. ` +
-            'Ensure the Python venv exists (npm run python:setup) and tesseract is installed.'
+            'Ensure the Python environment exists (npm run python:setup).'
         )
       }
     })()
@@ -149,7 +149,8 @@ export class PythonWorker {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`worker request "${op}" timed out after ${opts.timeoutMs}ms`))
+        const timeoutMs = opts.timeoutMs ?? 120000
+        reject(new Error(`worker request "${op}" timed out after ${timeoutMs}ms`))
       }, opts.timeoutMs ?? 120000)
       this.pending.set(id, {
         resolve: resolve as (v: unknown) => void,

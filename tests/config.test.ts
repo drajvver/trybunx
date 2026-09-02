@@ -12,6 +12,8 @@ describe('config', () => {
   it('rejects nonsensical values', () => {
     expect(() => resolveConfig({ clips: { max_clip_seconds: 0 } })).toThrow()
     expect(() => resolveConfig({ clips: { encoding: 'flac' } })).toThrow()
+    expect(() => resolveConfig({ ocr: { engine: 'magic' } })).toThrow()
+    expect(() => resolveConfig({ ocr: { provider: 'cuda' } })).toThrow()
   })
 })
 

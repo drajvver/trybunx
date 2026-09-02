@@ -36,6 +36,9 @@ export interface OCRSample {
   score?: Score
   confidence: number
   raw?: string
+  engine?: string
+  provider?: string
+  inference_seconds?: number
 }
 
 export type ScoreChangeValidation = 'valid' | 'suspicious' | 'invalid'
@@ -155,10 +158,14 @@ export interface AnalysisMetadata {
   output_dir: string
   duration_seconds: number
   video_resolution: string
+  scoreboard_roi?: Roi
   analysis_started_at: string
   analysis_finished_at?: string
   ocr_samples: number
   ocr_ok_samples: number
+  ocr_engines?: Record<string, number>
+  ocr_providers?: Record<string, number>
+  ocr_inference_seconds?: number
   fine_scan_windows: number
   audio_spikes_detected: number
   score_changes_detected: number

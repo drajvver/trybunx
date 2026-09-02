@@ -16,6 +16,9 @@ export interface AppConfig {
     refine_change_times: boolean
   }
   ocr: {
+    engine: 'neural' | 'tesseract'
+    provider: 'auto' | 'coreml' | 'cpu'
+    fallback_to_tesseract: boolean
     confirmation_reads: number
     confirmation_window_seconds: number
     upscale: number
@@ -63,6 +66,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     refine_change_times: true
   },
   ocr: {
+    engine: 'neural',
+    provider: 'auto',
+    fallback_to_tesseract: false,
     confirmation_reads: 3,
     confirmation_window_seconds: 3,
     upscale: 3,
@@ -168,6 +174,12 @@ function validateConfig(cfg: AppConfig): void {
   if (cfg.analysis.ocr_interval_ms < 50) throw new Error('analysis.ocr_interval_ms must be >= 50')
   if (cfg.analysis.fine_ocr_interval_ms < 20) throw new Error('analysis.fine_ocr_interval_ms must be >= 20')
   if (cfg.ocr.confirmation_reads < 2) throw new Error('ocr.confirmation_reads must be >= 2')
+  if (cfg.ocr.engine !== 'neural' && cfg.ocr.engine !== 'tesseract') {
+    throw new Error('ocr.engine must be "neural" or "tesseract"')
+  }
+  if (!['auto', 'coreml', 'cpu'].includes(cfg.ocr.provider)) {
+    throw new Error('ocr.provider must be "auto", "coreml", or "cpu"')
+  }
   if (cfg.audio.rms_window_ms < 10) throw new Error('audio.rms_window_ms must be >= 10')
   if (cfg.clips.max_clip_seconds <= 0) throw new Error('clips.max_clip_seconds must be > 0')
   if (cfg.clips.encoding !== 'reencode' && cfg.clips.encoding !== 'copy') {

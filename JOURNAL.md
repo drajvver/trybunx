@@ -5,6 +5,52 @@ remains. PRD reference: `prd.md` (v0.2 of the document, VOD edition).
 
 ---
 
+## 2026-09-02 — Mac-first neural OCR
+
+- Replaced Tesseract as the default with RapidOCR PP-OCRv6 models running via
+  ONNX Runtime. `ocr.provider: auto` selects CoreML on macOS and neural CPU
+  elsewhere; CoreML initialization failure falls back to neural CPU. The old
+  Tesseract engine remains available explicitly but is no longer required.
+- Added persistent model sessions, real model confidence, provider/engine
+  diagnostics, per-run inference timing, and geometry-aware parsing for
+  scoreboards whose two digits are separate boxes without a textual colon.
+- Added automatic layout calibration: the first full OCR pass locates the one
+  score line or two digit boxes, then later frames use recognition-only crops.
+  This reduced warm per-frame CPU inference on the real sample from about
+  0.36 s to about 0.008 s; CoreML is selectable and measured independently.
+- Fixed frame extraction's `start_number: 0` indexing mismatch, which skipped
+  frame zero and requested one nonexistent final frame.
+- Final real 5-minute 1920x1080 AV1 smoke run on Apple Silicon/CoreML: 276/300
+  readable samples, baseline `0:0`, transition `0:0 -> 0:1`, one goal and one
+  clip. Total time was 24.1 s (7.75 s neural inference), versus 47 s and 0/300
+  readable samples for the original Tesseract run on the same file and ROI.
+  An interim compatibility run showed legacy fallback only added cost, so it is
+  now off by default.
+- Verification: neural parser/inference/calibration tests pass, 38 non-E2E
+  TypeScript tests pass, typecheck is clean, and the real-VOD pipeline completed
+  end to end. The generated Linux-font synthetic E2E fixture was not rerun on
+  macOS because this Homebrew FFmpeg build lacks the `drawtext` filter.
+
+---
+
+## 2026-09-02 — Tight score-only ROI fix
+
+- Diagnosed an app/CLI discrepancy on `short.webm`: the app used a tight
+  score-only ROI while the earlier CLI verification used the whole scoreboard.
+  PP-OCR returned tight crops as compact `00`/`01` or divider-based `0|1`, which
+  the initial parser did not accept. It eventually miscalibrated and treated
+  `1:1` as the baseline, so no transition was emitted.
+- Added divider and tightly-scoped compact-score parsing. Compact two-digit
+  splitting is enabled only for narrow score-only regions/calibrated crops so a
+  `22` elsewhere in a full scoreboard cannot be mistaken for `2:2`.
+- Added `scoreboard_roi` to `analysis.json` so future runs are reproducible from
+  metadata, and replaced removed FFmpeg 8 `-vsync` syntax with `-fps_mode`.
+- Verified with the app's exact persisted ROI: 274/300 readable samples,
+  baseline `0:0`, refined change `0:0 -> 0:1` at 151.4 s, one goal event and
+  clip; 18.8 s total with 3.79 s CoreML inference.
+
+---
+
 ## 2026-09-02 — v0.1 implementation complete
 
 ### Environment (Ubuntu 24.04 container, no GPU, 4 cores / 8 GB)

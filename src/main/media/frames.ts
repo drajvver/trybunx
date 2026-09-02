@@ -77,7 +77,7 @@ export async function extractFrames(req: ExtractFramesRequest): Promise<ExtractF
   args.push(
     '-i', inputPath,
     '-vf', filters.join(','),
-    '-vsync', 'cfr',
+    '-fps_mode', 'cfr',
     '-start_number', '0',
     `${outputDir}/%08d.png`
   )
@@ -91,7 +91,7 @@ export async function extractFrames(req: ExtractFramesRequest): Promise<ExtractF
     count: files.length,
     startSeconds: start,
     intervalSeconds: intervalMs / 1000,
-    framePath: (index: number) => `${outputDir}/${String(index + 1).padStart(8, '0')}.png`
+    framePath: (index: number) => `${outputDir}/${String(index).padStart(8, '0')}.png`
   }
 }
 

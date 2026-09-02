@@ -10,6 +10,9 @@ analysis:
   refine_change_times: true      # use fine scans to refine change timestamps
 
 ocr:
+  engine: neural                  # neural (RapidOCR/ONNX) | tesseract
+  provider: auto                  # auto | coreml | cpu (CUDA can be added later)
+  fallback_to_tesseract: false    # opt-in legacy fallback; slower on unreadable frames
   confirmation_reads: 3          # repeated reads required to accept a score
   confirmation_window_seconds: 3 # reads must happen within this window
   upscale: 3                     # ROI upscale factor applied by ffmpeg
@@ -39,9 +42,9 @@ goal_detection:
     agreeing_signals: 0.05
 
 clips:
-  goal_pre_roll_seconds: 14
+  goal_pre_roll_seconds: 20
   goal_post_roll_seconds: 12
-  max_clip_seconds: 30
+  max_clip_seconds: 40
   create_clips_for_unknown: false # UNKNOWN_INTERESTING events get no clips in v0.1
   encoding: reencode              # reencode = accurate cuts (preferred); copy = fast
   video_crf: 23

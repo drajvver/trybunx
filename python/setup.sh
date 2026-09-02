@@ -41,9 +41,13 @@ if [ "$PORTABLE" = "1" ]; then
   rm -f python/.requirements.lock
   echo "Verifying portable install..."
   PYTHONPATH=python/vendor python3 - <<'EOF'
-import cv2, pytesseract, numpy
+import cv2, pytesseract, numpy, onnxruntime, rapidocr
 print("portable python deps OK:", cv2.__version__, numpy.__version__)
-print("tesseract:", pytesseract.get_tesseract_version())
+print("ONNX providers:", onnxruntime.get_available_providers())
+try:
+    print("optional tesseract:", pytesseract.get_tesseract_version())
+except Exception:
+    print("optional tesseract: not installed")
 EOF
   exit 0
 fi
@@ -53,7 +57,11 @@ uv sync --project python
 
 echo "Verifying install..."
 uv run --project python python - <<'EOF'
-import cv2, pytesseract, numpy
+import cv2, pytesseract, numpy, onnxruntime, rapidocr
 print("python worker deps OK:", cv2.__version__, numpy.__version__)
-print("tesseract:", pytesseract.get_tesseract_version())
+print("ONNX providers:", onnxruntime.get_available_providers())
+try:
+    print("optional tesseract:", pytesseract.get_tesseract_version())
+except Exception:
+    print("optional tesseract: not installed")
 EOF

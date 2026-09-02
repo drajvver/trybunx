@@ -189,6 +189,13 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       stage('scoreboard_scan', 'running', done / total)
     )
     logger.log(`OCR complete: ${ocrSamples.filter((s) => s.ok).length}/${ocrSamples.length} readable samples`)
+    const ocrProviders = countValues(ocrSamples.map((s) => s.provider ?? 'unknown'))
+    const ocrEngines = countValues(ocrSamples.map((s) => s.engine ?? 'unknown'))
+    const ocrInferenceSeconds = ocrSamples.reduce((sum, s) => sum + (s.inference_seconds ?? 0), 0)
+    logger.log(
+      `OCR backend: engines=${JSON.stringify(ocrEngines)}, providers=${JSON.stringify(ocrProviders)}, ` +
+        `inference=${ocrInferenceSeconds.toFixed(2)}s`
+    )
     for (const s of ocrSamples) {
       if (s.ok) logger.log(`OCR ${scoreToString(s.score!)} (conf=${s.confidence.toFixed(2)})`, s.timestamp)
     }
@@ -292,10 +299,16 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       output_dir: runDir,
       duration_seconds: Number(media.durationSeconds.toFixed(3)),
       video_resolution: `${media.width}x${media.height}`,
+      scoreboard_roi: roi,
       analysis_started_at: startedAt.toISOString(),
       analysis_finished_at: new Date().toISOString(),
       ocr_samples: ocrSamples.length,
       ocr_ok_samples: ocrSamples.filter((s) => s.ok).length,
+      ocr_engines: countValues(ocrSamples.map((s) => s.engine ?? 'unknown')),
+      ocr_providers: countValues(ocrSamples.map((s) => s.provider ?? 'unknown')),
+      ocr_inference_seconds: Number(
+        ocrSamples.reduce((sum, s) => sum + (s.inference_seconds ?? 0), 0).toFixed(3)
+      ),
       fine_scan_windows: fineScanWindows,
       audio_spikes_detected: audioEvents.length,
       score_changes_detected: events.filter((e) => e.signals.score_change).length,
@@ -351,12 +364,19 @@ async function ocrFrames(
         timestamp: frames.startSeconds + i * frames.intervalSeconds
       })
     }
-    const result = (await worker.request('ocr_batch', {
-      frames: framesPayload,
-      upscale: 1, // frames are already cropped+upscaled by ffmpeg
-      min_confidence: cfg.ocr.min_confidence,
-      max_score: cfg.ocr.max_reasonable_score
-    })) as { samples: Array<Omit<OCRSample, 'score'> & { score?: string | null }> }
+    const result = (await worker.request(
+      'ocr_batch',
+      {
+        frames: framesPayload,
+        upscale: 1, // frames are already cropped+upscaled by ffmpeg
+        min_confidence: cfg.ocr.min_confidence,
+        max_score: cfg.ocr.max_reasonable_score,
+        engine: cfg.ocr.engine,
+        provider: cfg.ocr.provider,
+        fallback_to_tesseract: cfg.ocr.fallback_to_tesseract
+      },
+      { timeoutMs: 10 * 60 * 1000 }
+    )) as { samples: Array<Omit<OCRSample, 'score'> & { score?: string | null }> }
     // The worker speaks the wire format ("1:0"); convert to domain Scores.
     for (const s of result.samples) {
       const score = typeof s.score === 'string' ? parseScore(s.score) : (s.score ?? null)
@@ -365,6 +385,13 @@ async function ocrFrames(
     onProgress(end, total)
   }
   return samples
+}
+
+function countValues(values: string[]): Record<string, number> {
+  return values.reduce<Record<string, number>>((counts, value) => {
+    counts[value] = (counts[value] ?? 0) + 1
+    return counts
+  }, {})
 }
 
 interface BuildEventsContext {

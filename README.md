@@ -13,7 +13,7 @@ Electron / TypeScript  (product shell, orchestration, domain logic)
     +-- FFmpeg / ffprobe      media probing, frame & audio extraction, clips
     +-- detection core        score state machine, audio events, aggregation
     +-- optional Python worker (isolated child process, JSON Lines over stdio)
-            +-- scoreboard OCR (OpenCV + Tesseract)
+            +-- scoreboard OCR (RapidOCR/ONNX; Tesseract fallback)
 ```
 
 - `src/main/` — Electron main process: pipeline, detection, clips, IPC
@@ -25,8 +25,9 @@ Electron / TypeScript  (product shell, orchestration, domain logic)
 ## Setup
 
 Requirements: Node 20+, [uv](https://docs.astral.sh/uv/) (manages the Python
-side, auto-installs the pinned Python 3.12 if missing), ffmpeg, tesseract-ocr
-(xvfb for headless UI tests).
+side and auto-installs the pinned Python 3.12 if missing), and ffmpeg
+(xvfb for headless UI tests). Tesseract is optional and used only by the
+legacy OCR mode or opt-in fallback.
 
 ```bash
 npm install
@@ -35,9 +36,11 @@ npm run python:setup     # uv sync -> python/.venv
 
 Python deps live in `python/pyproject.toml` (Python >= 3.10, pinned to 3.12
 via `python/.python-version`; uv will use an already-installed interpreter
-or download one). If ffmpeg/tesseract are missing:
-- Ubuntu/Debian: `sudo apt install ffmpeg tesseract-ocr`
-- macOS: `brew install ffmpeg tesseract`
+or download one). Install ffmpeg with:
+- Ubuntu/Debian: `sudo apt install ffmpeg`
+- macOS: `brew install ffmpeg`
+
+For legacy OCR, also install `tesseract-ocr` (Linux) or `tesseract` (Homebrew).
 - Windows: install both and set `TRYBUNX_FFMPEG_PATH` / `TESSERACT_CMD`
 
 ### macOS notes
@@ -48,7 +51,7 @@ are found even when the app is launched from Finder (the app probes
 `TRYBUNX_FFMPEG_PATH` / `TESSERACT_CMD` / `TRYBUNX_PYTHON`).
 
 Build a distributable dmg (bundles the Python worker + deps, so end users
-only need ffmpeg + tesseract, which a future release will bundle too):
+only need ffmpeg, which a future release will bundle too):
 
 ```bash
 npm run python:setup:portable   # fills python/vendor (relocatable, no venv)
@@ -92,6 +95,14 @@ Everything the detection depends on lives in `config/default.yaml`:
 OCR intervals and confirmation rules, audio spike thresholds, lookback
 windows, confidence weights, clip pre/post-roll, dedup window, encoding.
 Changes apply on the next run without touching code.
+
+Neural OCR is the default. On Apple Silicon, `ocr.provider: auto` uses the
+ONNX Runtime CoreML provider and falls back to neural CPU inference if CoreML
+cannot compile the model. Set `ocr.provider: cpu` when comparing performance,
+or `ocr.engine: tesseract` to diagnose a regression against the legacy engine.
+`ocr.fallback_to_tesseract` is disabled by default because neural misses are
+handled by temporal confirmation and invoking the legacy engine is relatively
+expensive.
 
 ## Tests
 

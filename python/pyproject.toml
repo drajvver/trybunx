@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "OCR analysis worker for TrybunaTV AI Clip Hunter"
 requires-python = ">=3.10"
 dependencies = [
-    "opencv-python-headless>=4.8,<6",
+    "onnxruntime>=1.23,<2",
     "pytesseract>=0.3.10,<0.4",
+    "rapidocr>=3.9,<4",
     "numpy>=1.26,<3",
 ]
 
