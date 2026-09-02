@@ -15,7 +15,7 @@ import {
 } from '../../shared/contracts'
 import { AppConfig, parseScore, sanitizeRoi, sameScore, scoreToString } from '../../shared/config'
 import { probeMedia } from '../media/ffprobe'
-import { extractFrames } from '../media/frames'
+import { resolveBinary } from '../media/process'
 import { analyzePcm, extractAnalysisAudio, readWavPcm } from '../media/audio'
 import { PythonWorker } from '../workers/python_worker'
 import { detectScoreChanges } from '../detection/score_state'
@@ -135,6 +135,8 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
   let audioEvents: Array<{ timestamp: number; deltaDb: number }> = []
   let events: DetectedEvent[] = []
   let fineScanWindows = 0
+  let videoDecoder = 'software'
+  let hardwareDecodeFallback = false
 
   try {
     // ---- stage: prepare --------------------------------------------------
@@ -170,23 +172,28 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       throw new AnalysisError(`OCR cannot initialize: ${(err as Error).message}`, 'scoreboard_scan')
     }
 
-    const coarseDir = join(tempDir, 'frames_coarse')
     const intervalMs = cfg.analysis.ocr_interval_ms
-    logger.log(`Extracting scoreboard frames every ${intervalMs}ms (ROI ${JSON.stringify(roi)})`)
-    const coarse = await extractFrames({
+    logger.log(`Streaming scoreboard frames every ${intervalMs}ms (ROI ${JSON.stringify(roi)})`)
+    const coarse = await ocrVideoFrames({
+      worker,
       inputPath,
-      outputDir: coarseDir,
+      start: 0,
+      end: media.durationSeconds,
       intervalMs,
       roi,
       videoWidth: media.width,
       videoHeight: media.height,
-      upscale: cfg.ocr.upscale,
-      signal
+      cfg,
+      signal,
+      onProgress: (done, total) => stage('scoreboard_scan', 'running', done / total)
     })
-    logger.log(`Extracted ${coarse.count} frames for OCR`)
-
-    ocrSamples = await ocrFrames(worker, coarse, cfg, signal, (done, total) =>
-      stage('scoreboard_scan', 'running', done / total)
+    ocrSamples = coarse.samples
+    videoDecoder = coarse.decoder
+    hardwareDecodeFallback = coarse.hardwareDecodeFallback
+    logger.log(
+      `Streamed ${ocrSamples.length} frames: neural=${coarse.inferredFrames}, ` +
+        `reused=${coarse.reusedFrames}, decoder=${videoDecoder}` +
+        (hardwareDecodeFallback ? ' (hardware fallback)' : '')
     )
     logger.log(`OCR complete: ${ocrSamples.filter((s) => s.ok).length}/${ocrSamples.length} readable samples`)
     const ocrProviders = countValues(ocrSamples.map((s) => s.provider ?? 'unknown'))
@@ -245,6 +252,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       tempDir,
       inputPath,
       signal,
+      videoDecoder,
       countFineScan: () => fineScanWindows++
     })
     logger.log(`Built ${events.filter((e) => e.type === 'GOAL').length} goal events`)
@@ -299,6 +307,8 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       output_dir: runDir,
       duration_seconds: Number(media.durationSeconds.toFixed(3)),
       video_resolution: `${media.width}x${media.height}`,
+      video_decoder: videoDecoder,
+      hardware_decode_fallback: hardwareDecodeFallback,
       scoreboard_roi: roi,
       analysis_started_at: startedAt.toISOString(),
       analysis_finished_at: new Date().toISOString(),
@@ -309,6 +319,8 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       ocr_inference_seconds: Number(
         ocrSamples.reduce((sum, s) => sum + (s.inference_seconds ?? 0), 0).toFixed(3)
       ),
+      ocr_inferred_samples: ocrSamples.filter((s) => !s.reused).length,
+      ocr_reused_samples: ocrSamples.filter((s) => s.reused).length,
       fine_scan_windows: fineScanWindows,
       audio_spikes_detected: audioEvents.length,
       score_changes_detected: events.filter((e) => e.signals.score_change).length,
@@ -342,49 +354,93 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
   }
 }
 
-/** OCR a set of extracted frames through the Python worker, in batches. */
-async function ocrFrames(
-  worker: PythonWorker,
-  frames: { count: number; framePath: (i: number) => string; startSeconds: number; intervalSeconds: number },
-  cfg: AppConfig,
-  signal: AbortSignal | undefined,
+interface OcrVideoRequest {
+  worker: PythonWorker
+  inputPath: string
+  start: number
+  end: number
+  intervalMs: number
+  roi: Roi
+  videoWidth: number
+  videoHeight: number
+  cfg: AppConfig
+  decodeAcceleration?: 'auto' | 'videotoolbox' | 'software'
+  signal?: AbortSignal
   onProgress: (done: number, total: number) => void
-): Promise<OCRSample[]> {
-  const samples: OCRSample[] = []
-  const total = frames.count
-  const batch = Math.max(1, cfg.ocr.worker_batch_size)
+}
 
-  for (let start = 0; start < total; start += batch) {
-    signal?.throwIfAborted()
-    const end = Math.min(total, start + batch)
-    const framesPayload = []
-    for (let i = start; i < end; i++) {
-      framesPayload.push({
-        path: frames.framePath(i),
-        timestamp: frames.startSeconds + i * frames.intervalSeconds
-      })
+interface OcrVideoResult {
+  samples: OCRSample[]
+  inferredFrames: number
+  reusedFrames: number
+  decoder: string
+  hardwareDecodeFallback: boolean
+}
+
+/** Stream ROI frames directly from FFmpeg inside the worker; no PNG intermediates. */
+async function ocrVideoFrames(req: OcrVideoRequest): Promise<OcrVideoResult> {
+  req.signal?.throwIfAborted()
+  const x = Math.max(0, Math.round(req.roi.x * req.videoWidth))
+  const y = Math.max(0, Math.round(req.roi.y * req.videoHeight))
+  const width = Math.min(
+    req.videoWidth - x,
+    Math.max(2, Math.round(req.roi.width * req.videoWidth))
+  )
+  const height = Math.min(
+    req.videoHeight - y,
+    Math.max(2, Math.round(req.roi.height * req.videoHeight))
+  )
+  const outputWidth = Math.max(2, Math.round(width * req.cfg.ocr.upscale))
+  const outputHeight = Math.max(2, Math.round(height * req.cfg.ocr.upscale))
+  const total = Math.max(1, Math.ceil(((req.end - req.start) * 1000) / req.intervalMs))
+
+  const result = await req.worker.request<{
+    samples: Array<Omit<OCRSample, 'score'> & { score?: string | null }>
+    frame_count: number
+    inferred_frames: number
+    reused_frames: number
+    decoder: string
+    hardware_decode_fallback: boolean
+  }>(
+    'ocr_video',
+    {
+      input_path: req.inputPath,
+      ffmpeg_path: resolveBinary('ffmpeg'),
+      start: req.start,
+      end: req.end,
+      interval_ms: req.intervalMs,
+      crop: { x, y, width, height },
+      output_width: outputWidth,
+      output_height: outputHeight,
+      min_confidence: req.cfg.ocr.min_confidence,
+      max_score: req.cfg.ocr.max_reasonable_score,
+      engine: req.cfg.ocr.engine,
+      provider: req.cfg.ocr.provider,
+      fallback_to_tesseract: req.cfg.ocr.fallback_to_tesseract,
+      change_detection_enabled: req.cfg.ocr.change_detection_enabled,
+      change_threshold: req.cfg.ocr.change_threshold,
+      refresh_interval_seconds: req.cfg.ocr.refresh_interval_seconds,
+      confirmation_reads: req.cfg.ocr.confirmation_reads,
+      decode_acceleration: req.decodeAcceleration ?? req.cfg.analysis.decode_acceleration
+    },
+    {
+      timeoutMs: 24 * 60 * 60 * 1000,
+      onProgress: (done) => req.onProgress(Math.min(done, total), total)
     }
-    const result = (await worker.request(
-      'ocr_batch',
-      {
-        frames: framesPayload,
-        upscale: 1, // frames are already cropped+upscaled by ffmpeg
-        min_confidence: cfg.ocr.min_confidence,
-        max_score: cfg.ocr.max_reasonable_score,
-        engine: cfg.ocr.engine,
-        provider: cfg.ocr.provider,
-        fallback_to_tesseract: cfg.ocr.fallback_to_tesseract
-      },
-      { timeoutMs: 10 * 60 * 1000 }
-    )) as { samples: Array<Omit<OCRSample, 'score'> & { score?: string | null }> }
-    // The worker speaks the wire format ("1:0"); convert to domain Scores.
-    for (const s of result.samples) {
-      const score = typeof s.score === 'string' ? parseScore(s.score) : (s.score ?? null)
-      samples.push({ ...s, ok: s.ok && !!score, score: score ?? undefined })
-    }
-    onProgress(end, total)
+  )
+
+  const samples = result.samples.map((sample) => {
+    const score = typeof sample.score === 'string' ? parseScore(sample.score) : (sample.score ?? null)
+    return { ...sample, ok: sample.ok && !!score, score: score ?? undefined }
+  })
+  req.onProgress(total, total)
+  return {
+    samples,
+    inferredFrames: result.inferred_frames,
+    reusedFrames: result.reused_frames,
+    decoder: result.decoder,
+    hardwareDecodeFallback: result.hardware_decode_fallback
   }
-  return samples
 }
 
 function countValues(values: string[]): Record<string, number> {
@@ -407,6 +463,7 @@ interface BuildEventsContext {
   tempDir: string
   inputPath: string
   signal?: AbortSignal
+  videoDecoder: string
   countFineScan: () => void
 }
 
@@ -442,21 +499,22 @@ async function buildEvents(ctx: BuildEventsContext): Promise<DetectedEvent[]> {
 
     let fineSamples: OCRSample[] = []
     try {
-      const fineDir = `${ctx.tempDir}/frames_fine_${Math.round(change.changeTime * 1000)}`
-      const fine = await extractFrames({
+      const fine = await ocrVideoFrames({
+        worker: ctx.worker,
         inputPath: ctx.inputPath,
-        outputDir: fineDir,
         start: fineStart,
         end: fineEnd,
         intervalMs: cfg.analysis.fine_ocr_interval_ms,
         roi: ctx.roi,
         videoWidth: ctx.mediaSize.width,
         videoHeight: ctx.mediaSize.height,
-        upscale: ocrCfg.upscale,
-        signal: ctx.signal
+        cfg,
+        decodeAcceleration: ctx.videoDecoder === 'videotoolbox' ? 'videotoolbox' : 'software',
+        signal: ctx.signal,
+        onProgress: () => undefined
       })
       ctx.countFineScan()
-      fineSamples = await ocrFrames(ctx.worker, fine, cfg, ctx.signal, () => undefined)
+      fineSamples = fine.samples
       logger.log(
         `FINE_SCAN ${fineStart.toFixed(2)}-${fineEnd.toFixed(2)}s: ` +
           `${fineSamples.filter((s) => s.ok).length}/${fineSamples.length} readable`

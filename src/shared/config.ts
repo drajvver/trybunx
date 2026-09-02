@@ -14,11 +14,15 @@ export interface AppConfig {
     fine_scan_margin_seconds: number
     event_window_seconds: number
     refine_change_times: boolean
+    decode_acceleration: 'auto' | 'videotoolbox' | 'software'
   }
   ocr: {
     engine: 'neural' | 'tesseract'
     provider: 'auto' | 'coreml' | 'cpu'
     fallback_to_tesseract: boolean
+    change_detection_enabled: boolean
+    change_threshold: number
+    refresh_interval_seconds: number
     confirmation_reads: number
     confirmation_window_seconds: number
     upscale: number
@@ -63,12 +67,16 @@ export const DEFAULT_CONFIG: AppConfig = {
     fine_ocr_interval_ms: 200,
     fine_scan_margin_seconds: 2,
     event_window_seconds: 8,
-    refine_change_times: true
+    refine_change_times: true,
+    decode_acceleration: 'auto'
   },
   ocr: {
     engine: 'neural',
     provider: 'auto',
     fallback_to_tesseract: false,
+    change_detection_enabled: true,
+    change_threshold: 2,
+    refresh_interval_seconds: 30,
     confirmation_reads: 3,
     confirmation_window_seconds: 3,
     upscale: 3,
@@ -173,12 +181,19 @@ export function resolveConfig(...overrides: Array<unknown>): AppConfig {
 function validateConfig(cfg: AppConfig): void {
   if (cfg.analysis.ocr_interval_ms < 50) throw new Error('analysis.ocr_interval_ms must be >= 50')
   if (cfg.analysis.fine_ocr_interval_ms < 20) throw new Error('analysis.fine_ocr_interval_ms must be >= 20')
+  if (!['auto', 'videotoolbox', 'software'].includes(cfg.analysis.decode_acceleration)) {
+    throw new Error('analysis.decode_acceleration must be "auto", "videotoolbox", or "software"')
+  }
   if (cfg.ocr.confirmation_reads < 2) throw new Error('ocr.confirmation_reads must be >= 2')
   if (cfg.ocr.engine !== 'neural' && cfg.ocr.engine !== 'tesseract') {
     throw new Error('ocr.engine must be "neural" or "tesseract"')
   }
   if (!['auto', 'coreml', 'cpu'].includes(cfg.ocr.provider)) {
     throw new Error('ocr.provider must be "auto", "coreml", or "cpu"')
+  }
+  if (cfg.ocr.change_threshold < 0) throw new Error('ocr.change_threshold must be >= 0')
+  if (cfg.ocr.refresh_interval_seconds <= 0) {
+    throw new Error('ocr.refresh_interval_seconds must be > 0')
   }
   if (cfg.audio.rms_window_ms < 10) throw new Error('audio.rms_window_ms must be >= 10')
   if (cfg.clips.max_clip_seconds <= 0) throw new Error('clips.max_clip_seconds must be > 0')

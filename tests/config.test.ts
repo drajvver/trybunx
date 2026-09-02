@@ -14,6 +14,7 @@ describe('config', () => {
     expect(() => resolveConfig({ clips: { encoding: 'flac' } })).toThrow()
     expect(() => resolveConfig({ ocr: { engine: 'magic' } })).toThrow()
     expect(() => resolveConfig({ ocr: { provider: 'cuda' } })).toThrow()
+    expect(() => resolveConfig({ analysis: { decode_acceleration: 'cuda' } })).toThrow()
   })
 })
 

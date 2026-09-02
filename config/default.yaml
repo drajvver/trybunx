@@ -8,11 +8,15 @@ analysis:
   fine_scan_margin_seconds: 2    # extra context around a candidate window
   event_window_seconds: 8        # signal clustering window
   refine_change_times: true      # use fine scans to refine change timestamps
+  decode_acceleration: auto      # auto benchmarks VideoToolbox on macOS | videotoolbox | software
 
 ocr:
   engine: neural                  # neural (RapidOCR/ONNX) | tesseract
   provider: auto                  # auto | coreml | cpu (CUDA can be added later)
   fallback_to_tesseract: false    # opt-in legacy fallback; slower on unreadable frames
+  change_detection_enabled: true # reuse OCR while the score crop is visually unchanged
+  change_threshold: 2.0          # mean 8-bit pixel difference after downsampling
+  refresh_interval_seconds: 30   # force a neural read periodically even without change
   confirmation_reads: 3          # repeated reads required to accept a score
   confirmation_window_seconds: 3 # reads must happen within this window
   upscale: 3                     # ROI upscale factor applied by ffmpeg

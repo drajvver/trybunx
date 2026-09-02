@@ -183,7 +183,10 @@ class NeuralScoreReader:
         self.calibrated_failures = 0
 
     def read_score(self, img_bytes: bytes, max_score: int) -> NeuralScoreRead:
-        image = _decode(img_bytes)
+        return self.read_image(_decode(img_bytes), max_score)
+
+    def read_image(self, image: np.ndarray, max_score: int) -> NeuralScoreRead:
+        """Read an already-decoded BGR frame (the streaming fast path)."""
         previous_crops = self.score_crops
         calibrated = self._recognize_calibrated_crops(image, max_score)
         if calibrated is not None:

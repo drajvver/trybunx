@@ -5,6 +5,42 @@ remains. PRD reference: `prd.md` (v0.2 of the document, VOD edition).
 
 ---
 
+## 2026-09-02 — Streaming OCR and temporal reuse
+
+- Replaced the coarse/fine scan PNG handoff with a raw BGR24 pipe from FFmpeg
+  to the persistent Python worker. Frames are cropped and upscaled before they
+  enter Python, so analysis no longer writes hundreds of temporary images.
+- Added a cheap downsampled-frame change detector. Unchanged frames reuse the
+  last OCR result, periodic refreshes protect against subtle changes, and each
+  detected change triggers the configured number of independent OCR reads so a
+  single mistaken read cannot satisfy temporal confirmation by itself.
+- Added configuration for the change threshold/refresh interval and metadata
+  counters for inferred versus reused samples.
+- Verified with the exact app ROI on the 5-minute `short.webm`: 274/300 readable,
+  baseline `0:0`, refined `0:0 -> 0:1` at 151.4 s, goal event at 147.4 s, and
+  one clip. The accuracy-preserving run inferred 130 frames and reused 170;
+  CoreML inference was 2.03 s and total app-recorded processing was 15.3 s,
+  versus the prior 3.79 s and 18.8 s respectively.
+- Verification: 6 Python tests and 38 non-E2E TypeScript tests pass; typecheck
+  is clean. The synthetic E2E remains unavailable on this Mac because the
+  installed FFmpeg lacks `drawtext`.
+
+## 2026-09-02 — Adaptive macOS hardware decoding
+
+- Added `analysis.decode_acceleration`: `auto`, `videotoolbox`, or `software`.
+  Auto mode benchmarks a short section through the actual fps/crop/scale graph
+  and selects VideoToolbox only when it is at least 10% faster. Any hardware
+  initialization or mid-stream decode failure retries the scan in software.
+- Decoder choice and fallback are recorded in `analysis.json` and the analysis
+  log. Fine scans reuse the coarse scan's choice without repeating the probe.
+- This Mac and FFmpeg expose VideoToolbox and successfully decode the AV1 sample,
+  but forced hardware took 48.5 s versus 15.3 s for software because filtered
+  frames must cross back to CPU memory. Auto therefore correctly selected
+  software (17.2 s including its one-time probe).
+- Verified the forced hardware path and a simulated unavailable-hardware path;
+  both retained 274/300 readable samples, the `0:0 -> 0:1` transition, goal,
+  and clip. The simulated failure recorded `hardware_decode_fallback: true`.
+
 ## 2026-09-02 — Mac-first neural OCR
 
 - Replaced Tesseract as the default with RapidOCR PP-OCRv6 models running via
@@ -218,9 +254,10 @@ one-time smoke run on real hardware (see Remaining work).
 
 ### Known limitations (v0.1)
 
-- OCR sampling decodes the whole file (fps filter) — a 90 min 1080p VOD takes
-  roughly 10–20 min for the coarse pass on 4 cores, plus audio pass; fine
-  scans are cheap. Faster-than-real-time is v0.2 scope (PRD §36).
+- OCR sampling still decodes the whole file (fps filter), although frame OCR is
+  skipped while the ROI is visually unchanged. Decode speed now dominates and
+  depends heavily on source codec and hardware; selective/keyframe decoding is
+  still v0.2 scope.
 - Only one scoreboard layout / ROI per run (PRD §6.3); ROI is drawn manually.
 - Half-time graphics / replays that cover the scoreboard simply produce
   unreadable samples; they don't confuse the state machine but aren't
@@ -280,9 +317,8 @@ rejected numpy version). Fixed by moving the Python side fully to uv:
 - [ ] Bundle ffmpeg/ffprobe binaries (LGPL builds) into
       `Resources/bin` on mac/win so the app has zero external prereqs; resolve
       via `TRYBUNX_FFMPEG_PATH` set by the main process at startup.
-- [ ] OCR speedups: skip extraction entirely when the ROI is unchanged
-      (frame-hash prefilter), cache tesseract instance per worker, consider
-      `--oem 1` and downscale experiments (upscale=3 is the current default).
+- [ ] OCR speedups: investigate hardware decode and selective/keyframe seeking;
+      cache the Tesseract instance for legacy mode and test lower upscale values.
 - [ ] Multi-workspace progress details (log tail in the UI while running).
 - [ ] Retry-failed-stage button in the UI (PRD §9.4 step 5).
 - [ ] Installer-level code signing + notarization for mac; cert config for win.

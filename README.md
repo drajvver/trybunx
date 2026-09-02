@@ -104,6 +104,19 @@ or `ocr.engine: tesseract` to diagnose a regression against the legacy engine.
 handled by temporal confirmation and invoking the legacy engine is relatively
 expensive.
 
+The worker streams cropped frames directly from FFmpeg, avoiding temporary PNG
+files. A lightweight visual-change detector runs neural OCR only when the
+scoreboard changes (plus periodic refreshes), while still taking independent
+confirmation reads after every change. Tune this with
+`ocr.change_threshold`, `ocr.refresh_interval_seconds`, or disable it with
+`ocr.change_detection_enabled: false` when diagnosing unusual animated layouts.
+
+`analysis.decode_acceleration: auto` performs a short real-world decode probe on
+macOS and uses VideoToolbox only when it beats software decoding by a meaningful
+margin. Hardware initialization or decode errors transparently retry in
+software. Use `videotoolbox` to force a hardware attempt or `software` to skip
+the probe. `analysis.json` records `video_decoder` and whether fallback occurred.
+
 ## Tests
 
 ```bash
