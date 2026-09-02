@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Sets up the Python environment for the OCR worker.
+# Sets up the Python environment for the OCR worker using uv.
 #
-#   python/setup.sh             dev mode: create .venv and install deps there
-#   python/setup.sh --portable  install deps into python/vendor using the
-#                               system python3 (used for packaged apps; the
-#                               directory is relocatable, unlike a venv)
+#   python/setup.sh             dev mode: `uv sync` -> python/.venv
+#   python/setup.sh --portable  relocatable install -> python/vendor
+#                               (for packaged apps; no venv)
+#
+# The Python version is pinned in python/.python-version (3.12). uv uses an
+# already-installed interpreter or downloads one automatically.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,17 +18,29 @@ for arg in "$@"; do
   esac
 done
 
+if ! command -v uv > /dev/null 2>&1; then
+  cat >&2 <<'EOF'
+ERROR: uv is required but not installed.
+
+  macOS:   brew install uv
+  Linux:   curl -LsSf https://astral.sh/uv/install.sh | sh
+  Windows: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+Then re-run: npm run python:setup
+EOF
+  exit 1
+fi
+
 if [ "$PORTABLE" = "1" ]; then
-  PYTHON="${PYTHON:-python3}"
-  if ! "$PYTHON" -m pip --version > /dev/null 2>&1; then
-    echo "pip not found; trying ensurepip..."
-    "$PYTHON" -m ensurepip --upgrade
-  fi
-  echo "Installing portable python deps into python/vendor (interpreter: $PYTHON)"
+  echo "Installing portable python deps into python/vendor (uv)"
   rm -rf python/vendor
-  "$PYTHON" -m pip install --target python/vendor -r python/requirements.txt -q
+  # Export a requirements file from pyproject.toml, then install it
+  # relocatably with uv (venvs are not relocatable; vendor dirs are).
+  uv export --project python --no-hashes --no-dev -o python/.requirements.lock
+  uv pip install --target python/vendor -r python/.requirements.lock -q
+  rm -f python/.requirements.lock
   echo "Verifying portable install..."
-  PYTHONPATH=python/vendor "$PYTHON" - <<'EOF'
+  PYTHONPATH=python/vendor python3 - <<'EOF'
 import cv2, pytesseract, numpy
 print("portable python deps OK:", cv2.__version__, numpy.__version__)
 print("tesseract:", pytesseract.get_tesseract_version())
@@ -34,16 +48,11 @@ EOF
   exit 0
 fi
 
-VENV_DIR="${PYTHON_VENV:-.venv}"
+echo "Syncing python worker environment (uv, pinned in python/.python-version)"
+uv sync --project python
 
-if [ ! -d "$VENV_DIR" ]; then
-  python3 -m venv "$VENV_DIR"
-fi
-
-"$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install -r python/requirements.txt -q
-
-"$VENV_DIR/bin/python" - <<'EOF'
+echo "Verifying install..."
+uv run --project python python - <<'EOF'
 import cv2, pytesseract, numpy
 print("python worker deps OK:", cv2.__version__, numpy.__version__)
 print("tesseract:", pytesseract.get_tesseract_version())

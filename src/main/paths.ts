@@ -71,16 +71,24 @@ export function workerScriptPath(): string {
 /**
  * Python interpreter selection:
  *  1. TRYBUNX_PYTHON env override
- *  2. project .venv (dev setup via python/setup.sh)
- *  3. plain python3 (system interpreter; needs python/vendor with deps)
+ *  2. python/.venv created by `uv sync` (dev setup via python/setup.sh)
+ *  3. legacy .venv at the project root
+ *  4. plain python3 (system interpreter; needs python/vendor with deps)
  */
 export function pythonInterpreterPath(): string {
   if (process.env.TRYBUNX_PYTHON) return process.env.TRYBUNX_PYTHON
 
-  const devVenv = resolve(process.cwd(), '.venv/bin/python')
-  if (existsSync(devVenv)) return devVenv
-
+  for (const venvDir of ['python/.venv', '.venv']) {
+    const python = venvPython(join(resolve(process.cwd()), venvDir))
+    if (existsSync(python)) return python
+  }
   return 'python3'
+}
+
+function venvPython(venvDir: string): string {
+  return process.platform === 'win32'
+    ? join(venvDir, 'Scripts', 'python.exe')
+    : join(venvDir, 'bin', 'python')
 }
 
 /** Directory with vendored python deps (pip install --target), if present. */

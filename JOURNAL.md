@@ -128,13 +128,13 @@ Code fixes so the app runs on macOS (dev mode + packaged .app):
    `electron-builder.yml` ships `python/` + `config/` via `extraResources`
    (outside asar so native binaries stay executable).
 
-**Mac quickstart:**
+### Mac quickstart:
 
 ```bash
-brew install node ffmpeg tesseract        # prereqs
+brew install node ffmpeg tesseract uv     # prereqs
 git clone <repo> && cd trybunx
 npm install
-npm run python:setup                      # dev: .venv   (or python:setup:portable)
+npm run python:setup                      # uv sync -> python/.venv
 npm run dev                               # desktop app
 npm test                                  # unit + synthetic e2e
 ```
@@ -181,6 +181,29 @@ one-time smoke run on real hardware (see Remaining work).
   specially handled.
 - Tesseract conf=0 quirk makes confidence coarse (variant-position based).
 - No auto-update, no signing/notarization, no crash reporting.
+
+### 2026-09-02 — uv migration for the Python worker
+
+The first `npm run python:setup` attempt on the user's Mac failed: system
+`python3` was < 3.10 while pinned deps needed >= 3.10 (pip error listed every
+rejected numpy version). Fixed by moving the Python side fully to uv:
+
+- Deps moved from `python/requirements.txt` (deleted) to
+  `python/pyproject.toml` with `requires-python = ">=3.10"` and range
+  constraints (opencv >=4.8 <6, pytesseract, numpy >=1.26 <3).
+- Python pinned via `python/.python-version` (3.12; uv uses an installed
+  interpreter or auto-downloads).
+- `python/setup.sh` is now a thin uv wrapper:
+  - default: `uv sync --project python` → `python/.venv` (+ `uv.lock`),
+  - `--portable`: `uv export` + `uv pip install --target python/vendor`
+    (relocatable, for packaged apps).
+- Interpreter discovery (`src/main/paths.ts`, `pipeline/analyze.ts`) now
+  checks `python/.venv/bin/python` first (Windows `Scripts/python.exe`
+  aware), then legacy root `.venv`, then `python3`.
+- Verified in-container with uv 0.12.9: `uv sync`, e2e via default discovery
+  (3/3 goals), portable mode via `TRYBUNX_PYTHON=/usr/bin/python3` (3/3
+  goals), typecheck clean, 41/41 tests. Latest deps validated
+  (opencv-python-headless 5.0.0, numpy 2.5.2).
 
 ---
 

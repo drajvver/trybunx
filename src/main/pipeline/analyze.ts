@@ -64,8 +64,11 @@ export const STAGE_ORDER: StageName[] = [
 
 function defaultPythonPath(): string {
   if (process.env.TRYBUNX_PYTHON) return process.env.TRYBUNX_PYTHON
-  const venv = resolve(process.cwd(), '.venv/bin/python')
-  return existsSync(venv) ? venv : 'python3'
+  const candidates = [
+    resolve(process.cwd(), 'python', '.venv', 'bin', 'python'),
+    resolve(process.cwd(), '.venv', 'bin', 'python')
+  ]
+  return candidates.find((c) => existsSync(c)) ?? 'python3'
 }
 
 function defaultWorkerScript(): string {

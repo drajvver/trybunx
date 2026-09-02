@@ -24,15 +24,18 @@ Electron / TypeScript  (product shell, orchestration, domain logic)
 
 ## Setup
 
-Requirements: Node 20+, Python 3.10+, ffmpeg, tesseract-ocr, (xvfb for
-headless UI tests).
+Requirements: Node 20+, [uv](https://docs.astral.sh/uv/) (manages the Python
+side, auto-installs the pinned Python 3.12 if missing), ffmpeg, tesseract-ocr
+(xvfb for headless UI tests).
 
 ```bash
 npm install
-npm run python:setup     # creates .venv with opencv + pytesseract
+npm run python:setup     # uv sync -> python/.venv
 ```
 
-If ffmpeg/tesseract are missing:
+Python deps live in `python/pyproject.toml` (Python >= 3.10, pinned to 3.12
+via `python/.python-version`; uv will use an already-installed interpreter
+or download one). If ffmpeg/tesseract are missing:
 - Ubuntu/Debian: `sudo apt install ffmpeg tesseract-ocr`
 - macOS: `brew install ffmpeg tesseract`
 - Windows: install both and set `TRYBUNX_FFMPEG_PATH` / `TESSERACT_CMD`
