@@ -268,13 +268,18 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       logger.log('No events eligible for clips')
       stage('generate_clips', 'complete')
     } else {
-      const { failures } = await generateClips({
+      const { failures, verticalFailures } = await generateClips({
         inputPath,
         events: clipEvents,
         clipsDir,
         durationSeconds: media.durationSeconds,
         cfg,
         signal,
+        sourceWidth: media.width,
+        sourceHeight: media.height,
+        sourceFps: media.fps,
+        worker,
+        tempDir,
         onClipStart: () => undefined,
         onClipDone: (event, index, info) => {
           event.clip = info
@@ -283,11 +288,26 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
               `[${info.startSeconds.toFixed(2)}s -> ${info.endSeconds.toFixed(2)}s]`,
             event.event_time
           )
-          stage('generate_clips', 'running', index / clipEvents.length)
+          stage('generate_clips', 'running', index / clipEvents.length, `clip ${index}/${clipEvents.length}`)
         },
         onClipFailed: (event, _index, error) => {
           degraded.push(`clip_failed:${event.id}`)
           logger.error(`Clip failed for ${event.id}: ${error}`, event.event_time)
+        },
+        onVerticalDone: (event, index, info) => {
+          logger.log(
+            `VERTICAL ${index}/${clipEvents.length} ${info.path} ` +
+              `[${info.startSeconds.toFixed(2)}s -> ${info.endSeconds.toFixed(2)}s] ` +
+              `tracked=${info.tracking?.tracked ?? 0}/${info.tracking?.samples ?? 0}` +
+              (info.tracking?.fallback ? ' (center fallback)' : ''),
+            event.event_time
+          )
+          if (info.tracking?.fallback) degraded.push(`vertical_center_fallback:${event.id}`)
+          stage('generate_clips', 'running', index / clipEvents.length, `vertical ${index}/${clipEvents.length}`)
+        },
+        onVerticalFailed: (event, _index, error) => {
+          degraded.push(`vertical_failed:${event.id}`)
+          logger.error(`Vertical clip failed for ${event.id}: ${error}`, event.event_time)
         }
       })
       if (failures.length === clipEvents.length && clipEvents.length > 0) {
@@ -295,6 +315,9 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
           `All clip generations failed. First error: ${failures[0].error}`,
           'generate_clips'
         )
+      }
+      if (verticalFailures.length > 0) {
+        logger.warn(`${verticalFailures.length}/${clipEvents.length} vertical clips failed (horizontal clips unaffected)`)
       }
       stage('generate_clips', 'complete', 1)
     }
@@ -326,6 +349,8 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
       score_changes_detected: events.filter((e) => e.signals.score_change).length,
       goal_events_created: events.filter((e) => e.type === 'GOAL').length,
       clips_created: events.filter((e) => e.clip).length,
+      vertical_clips_created: events.filter((e) => e.clip_vertical).length,
+      vertical_center_fallbacks: events.filter((e) => e.clip_vertical?.tracking?.fallback).length,
       processing_seconds: Number(((Date.now() - startedMs) / 1000).toFixed(1)),
       degraded: [...new Set(degraded)],
       config_used: cfg

@@ -53,6 +53,10 @@ export function App(): JSX.Element {
       max_clip_seconds: number
       encoding: string
     }
+    vertical: {
+      width: number
+      height: number
+    }
   }
 
   // Load persisted settings (ROI survives restarts; PRD 29.2).
@@ -195,6 +199,10 @@ export function App(): JSX.Element {
             </span>
             <span>Dedup</span>
             <span>{config.goal_detection.dedup_seconds}s per score transition</span>
+            <span>Vertical</span>
+            <span>
+              {config.vertical.width}x{config.vertical.height} ball-following twin per goal
+            </span>
           </div>
         )}
         <div className="row">

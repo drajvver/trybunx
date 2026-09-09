@@ -159,6 +159,17 @@ export function ResultsPanel(props: { result: AnalysisResult | null }): JSX.Elem
                   ) : (
                     '—'
                   )}
+                  {e.clip_vertical && (
+                    <>
+                      <br />
+                      <button
+                        className="link"
+                        onClick={() => void window.clipHunter.showItemInFolder(e.clip_vertical!.path)}
+                      >
+                        {e.clip_vertical.path.split('/').pop()}
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

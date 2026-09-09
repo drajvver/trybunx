@@ -6,9 +6,13 @@ tests/fixtures/e2e_output/
 tests/fixtures/synthetic_match.mp4
 tests/fixtures/synthetic_match.truth.json
 tests/fixtures/e2e_output
+tests/fixtures/vertical_proxy/
 .venv/
 __pycache__/
 *.pyc
 .DS_Store
 python/vendor/
 python/.requirements.lock
+# Ball model (~13 MB) is fetched via python/track/download_model.py.
+python/track/models/*.onnx
+!python/track/models/.gitkeep

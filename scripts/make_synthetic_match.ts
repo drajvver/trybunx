@@ -52,11 +52,66 @@ function audioFilter(): string {
   return `volume='0.06 ${boosts}':eval=frame`
 }
 
+/**
+ * A trackable ball for the vertical-crop E2E: a white disc with dark patches
+ * (the texture nano-YOLO keys on) sweeping across the pitch. It crosses the
+ * frame center exactly at each goal moment so the 9:16 window must pan to
+ * keep it in frame.
+ *
+ * NOTE: drawbox x/y expressions with `t` are evaluated once per filtergraph
+ * config in this FFmpeg version, so the sweep is rendered as discrete
+ * per-second steps instead of smooth motion. Tracking only needs ~3 samples
+ * per second, so steps are fine. Circles are approximated with stacked boxes
+ * (drawbox cannot draw circles); r=20 reads at conf ~0.6 after H.264.
+ */
+export function ballOverlay(): string {
+  return ballOverlayChunk(0, DURATION_S)
+}
+
+/** Ball overlay filters active inside [from, to), for chunked encoding. */
+export function ballOverlayChunk(from: number, to: number): string {
+  const overlays: string[] = []
+  // Disc rows: [dy, dx, w] relative to a 44x44 box (r=20 disc).
+  const rows: Array<[number, number, number]> = [
+    [2, 13, 18],
+    [5, 8, 28],
+    [8, 5, 34],
+    [11, 3, 38],
+    [14, 2, 40],
+    [17, 2, 40],
+    [20, 2, 40],
+    [23, 2, 40],
+    [26, 3, 38],
+    [29, 5, 34],
+    [32, 8, 28],
+    [35, 13, 18]
+  ]
+  for (const g of GOALS) {
+    const t0 = Math.max(0, Math.floor(g.goalTime - 8))
+    const t1 = Math.ceil(g.goalTime + 8)
+    for (let t = t0; t < t1; t++) {
+      if (t + 1 <= from || t >= to) continue
+      const x = Math.round(((t - t0 + 0.5) / (t1 - t0)) * (WIDTH - 60))
+      const y = 330 + Math.round(60 * Math.sin((t / 4) * Math.PI))
+      const en = `enable='between(t,${t},${t + 1})'`
+      for (const [dy, dx, w] of rows) {
+        overlays.push(`drawbox=x=${x + dx}:y=${y + dy}:w=${w}:h=3:color=white:t=fill:${en}`)
+      }
+      overlays.push(`drawbox=x=${x + 15}:y=${y + 14}:w=10:h=10:color=black:t=fill:${en}`)
+      overlays.push(`drawbox=x=${x + 28}:y=${y + 26}:w=8:h=8:color=black:t=fill:${en}`)
+    }
+  }
+  return overlays.join(',')
+}
+
 export async function makeSyntheticMatch(outPath: string, force = false): Promise<void> {
   if (existsSync(outPath) && !force) return
   await mkdir(resolve(outPath, '..'), { recursive: true })
 
-  const vf = ['drawbox=x=16:y=16:w=300:h=64:color=black@0.9:t=fill', ...scoreTexts()].join(',')
+  const vf = [
+    'drawbox=x=16:y=16:w=300:h=64:color=black@0.9:t=fill',
+    ...scoreTexts()
+  ].join(',')
 
   await runProcess(
     'ffmpeg',
@@ -69,10 +124,44 @@ export async function makeSyntheticMatch(outPath: string, force = false): Promis
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '96k',
       '-shortest',
-      outPath
+      `${outPath}.noball.mp4`
     ],
     { timeoutSeconds: 600 }
   )
+
+  // Second pass overlays the trackable ball. (One pass with ~700 drawbox
+  // filters trips an FFmpeg filtergraph limit on some builds, and the ball
+  // must be overlaid after encoding anyway; two passes stay reliable.)
+  // Chunk the overlay into segments so no single filtergraph is oversized.
+  const CHUNK_S = 60
+  let chained = `${outPath}.noball.mp4`
+  for (let c = 0; c * CHUNK_S < DURATION_S; c++) {
+    const from = c * CHUNK_S
+    const to = Math.min(DURATION_S, from + CHUNK_S)
+    const chunkFilters = ballOverlayChunk(from, to)
+    const next = c * CHUNK_S + CHUNK_S >= DURATION_S ? outPath : `${outPath}.ball${c}.mp4`
+    if (chunkFilters) {
+      await runProcess(
+        'ffmpeg',
+        [
+          '-y', '-hide_banner', '-loglevel', 'error',
+          '-i', chained,
+          '-vf', chunkFilters,
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+          '-c:a', 'copy',
+          next
+        ],
+        { timeoutSeconds: 600 }
+      )
+    } else if (next !== chained) {
+      await import('fs/promises').then((m) => m.copyFile(chained, next))
+    }
+    if (chained !== `${outPath}.noball.mp4`) {
+      await import('fs/promises').then((m) => m.rm(chained, { force: true }))
+    }
+    chained = next
+  }
+  await import('fs/promises').then((m) => m.rm(`${outPath}.noball.mp4`, { force: true }))
 
   const truth = {
     video: resolve(outPath),

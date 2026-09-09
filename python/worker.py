@@ -28,6 +28,7 @@ import pytesseract
 from ocr.change_detection import FrameChangeDetector
 from ocr.engine import read_score
 from ocr.neural import NeuralScoreReader
+from track.ball import BallModelError, track_ball_video
 
 
 def find_tesseract() -> str:
@@ -451,6 +452,9 @@ OPS = {
     "ping": op_ping,
     "ocr_batch": op_ocr_batch,
     "ocr_video": op_ocr_video,
+    "track_ball_video": lambda params: track_ball_video(
+        params, emit, current_request_id[0], active_ffmpeg
+    ),
 }
 
 current_request_id = [""]

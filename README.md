@@ -85,9 +85,26 @@ Outputs land in `output/<video>_<timestamp>/`:
 ```text
 events.json      detected events with signals, confidence and clip info
 analysis.json    run metadata (counts, durations, config snapshot)
-clips/           goal_01_67m14s.mp4 ...
+clips/           goal_01_67m14s.mp4 + goal_01_67m14s_vertical.mp4 ...
 logs/analysis.log  per-sample detection log for tuning
 ```
+
+Every goal produces two clips of the same window with identical audio: the
+horizontal original and an action-following 9:16 vertical twin
+(`*_vertical.mp4`, 1080x1920, flat in `clips/`). The vertical crop keeps full
+source height and pans horizontally after the action: the Python worker runs
+one YOLOv8n ONNX pass per sampled frame (~3 samples/s) and follows the
+tallest close-up player (COCO `person`, the close-up the broadcast is
+showing), switching to the ball (COCO `sports-ball`) only when it is seen
+confidently and continuously. Trajectory is smoothed with hold-last +
+ease-to-center when the action is lost. Fetch the model once with:
+
+```bash
+python/track/download_model.py   # ~13 MB, git-ignored
+```
+
+If the model is missing, vertical clips degrade to a static center crop and
+the run records `vertical_center_fallback:<event>` instead of failing.
 
 ## Tuning
 
@@ -125,8 +142,9 @@ npm run test:ui # Electron UI smoke test (headless, uses xvfb if needed)
 ```
 
 The e2e test generates a synthetic broadcast (scoreboard graphic + crowd
-audio) with known goal times and verifies the full pipeline: baseline
-handling, anomaly rejection, transitions, timestamps, dedup and clips.
+audio + a sweeping trackable ball) with known goal times and verifies the
+full pipeline: baseline handling, anomaly rejection, transitions, timestamps,
+dedup, horizontal clips and 1080x1920 vertical twins.
 
 ## Benchmark (PRD Milestone 5)
 
@@ -138,8 +156,10 @@ into a directory, then:
 npm run benchmark -- --dir dataset --roi "0.04,0.03,0.18,0.08"
 ```
 
-It reports goal recall, precision, duplicate rate, median timestamp error
-and clip coverage against the PRD section 34 targets.
+It reports goal recall, precision, duplicate rate, median timestamp error,
+clip coverage and vertical-twin coverage against the PRD section 34 targets
+(vertical twins have no PRD target yet; the benchmark reports the share of
+correctly detected goals whose 1080x1920 twin matches the horizontal window).
 
 ## v0.1 scope notes
 

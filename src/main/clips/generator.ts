@@ -3,6 +3,8 @@ import { ClipInfo, DetectedEvent } from '../../shared/contracts'
 import { AppConfig } from '../../shared/config'
 import { resolveBinary, runProcess } from '../media/process'
 import { probeMedia } from '../media/ffprobe'
+import { PythonWorker } from '../workers/python_worker'
+import { renderVerticalClip, verticalOutputPath } from '../vertical/renderer'
 
 export interface ClipWindow {
   start: number
@@ -40,6 +42,11 @@ export function clipFileName(event: DetectedEvent, index: number): string {
   return `${prefix}_${String(index).padStart(2, '0')}_${minutes}m${seconds}s.mp4`
 }
 
+/** Flat 9:16 twin next to the horizontal clip: goal_01_67m14s_vertical.mp4. */
+export function verticalClipFileName(event: DetectedEvent, index: number): string {
+  return clipFileName(event, index).replace(/\.mp4$/i, '_vertical.mp4')
+}
+
 export interface ClipGenerationOptions {
   inputPath: string
   events: DetectedEvent[]
@@ -47,9 +54,18 @@ export interface ClipGenerationOptions {
   durationSeconds: number
   cfg: AppConfig
   signal?: AbortSignal
+  /** Source media geometry, needed for the 9:16 crop math. */
+  sourceWidth?: number
+  sourceHeight?: number
+  sourceFps?: number
+  /** Isolated Python worker for ball tracking; vertical falls back to center crop without it. */
+  worker?: PythonWorker | null
+  tempDir?: string
   onClipStart?: (event: DetectedEvent, index: number) => void
   onClipDone?: (event: DetectedEvent, index: number, info: ClipInfo) => void
   onClipFailed?: (event: DetectedEvent, index: number, error: string) => void
+  onVerticalDone?: (event: DetectedEvent, index: number, info: ClipInfo) => void
+  onVerticalFailed?: (event: DetectedEvent, index: number, error: string) => void
 }
 
 /** Cut one clip with ffmpeg. Re-encoding is the default for accurate cuts (PRD 23.2). */
@@ -95,10 +111,12 @@ async function cutClip(
 export async function generateClips(opts: ClipGenerationOptions): Promise<{
   clips: Map<string, ClipInfo>
   failures: Array<{ eventId: string; error: string }>
+  verticalFailures: Array<{ eventId: string; error: string }>
 }> {
   await mkdir(opts.clipsDir, { recursive: true })
   const clips = new Map<string, ClipInfo>()
   const failures: Array<{ eventId: string; error: string }> = []
+  const verticalFailures: Array<{ eventId: string; error: string }> = []
   let index = 0
 
   for (const event of opts.events) {
@@ -126,7 +144,10 @@ export async function generateClips(opts: ClipGenerationOptions): Promise<{
         startSeconds: window.start,
         endSeconds: window.end,
         durationSeconds: Number(duration.toFixed(3)),
-        reencoded
+        reencoded,
+        variant: 'horizontal',
+        width: probe.width,
+        height: probe.height
       }
       clips.set(event.id, info)
       opts.onClipDone?.(event, index, info)
@@ -137,8 +158,41 @@ export async function generateClips(opts: ClipGenerationOptions): Promise<{
       }
       failures.push({ eventId: event.id, error: msg })
       opts.onClipFailed?.(event, index, msg)
+      continue
+    }
+
+    // Action-following 9:16 twin: same window, same audio, flat layout.
+    if (opts.cfg.vertical.enabled) {
+      try {
+        const verticalPath = `${opts.clipsDir}/${verticalClipFileName(event, index)}`
+        if (verticalOutputPath(outputPath) !== verticalPath) {
+          throw new Error('vertical naming diverged from horizontal clip')
+        }
+        const { info } = await renderVerticalClip({
+          inputPath: opts.inputPath,
+          outputPath: verticalPath,
+          window,
+          durationSeconds: opts.durationSeconds,
+          sourceWidth: opts.sourceWidth ?? 0,
+          sourceHeight: opts.sourceHeight ?? 0,
+          sourceFps: opts.sourceFps ?? 25,
+          cfg: opts.cfg,
+          worker: opts.worker,
+          tempDir: opts.tempDir ?? opts.clipsDir,
+          signal: opts.signal
+        })
+        event.clip_vertical = info
+        opts.onVerticalDone?.(event, index, info)
+      } catch (err) {
+        const msg = (err as Error).message
+        if (msg === 'cancelled' || (err as Error).name === 'ProcessError' && msg.includes('cancelled')) {
+          throw err
+        }
+        verticalFailures.push({ eventId: event.id, error: msg })
+        opts.onVerticalFailed?.(event, index, msg)
+      }
     }
   }
 
-  return { clips, failures }
+  return { clips, failures, verticalFailures }
 }

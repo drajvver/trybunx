@@ -5,6 +5,61 @@ remains. PRD reference: `prd.md` (v0.2 of the document, VOD edition).
 
 ---
 
+## 2026-09-09 — Action-following 9:16 vertical twins (ball failed on real footage)
+
+- Ball-only following does not work on real TrybunaTV broadcasts: YOLOv8n
+  `sports-ball` peaks at conf 0.0003-0.02 on real 1920x1080 frames (ball is
+  ~10-25 px wide = ~5 px in the 640 model input; verified even zoomed crops
+  and pitch-band upscales stay at 0.001-0.004). COCO `person` on the same
+  pass reads 0.6-0.9, so the tracker now follows the action instead.
+- Every goal clip gets a flat 9:16 twin (`goal_01_67m14s_vertical.mp4`,
+  1080x1920, same window + same AAC audio): `src/main/vertical/` (tracker,
+  smoothing, sendcmd crop command, renderer) + `generateClips` extension in
+  `src/main/clips/generator.ts`. Contracts: `clip_vertical` on
+  `DetectedEvent`, `variant/width/height/tracking` on `ClipInfo`,
+  `vertical_clips_created/vertical_center_fallbacks` in metadata.
+- Tracking (`python/track/ball.py`, `track_ball_video` worker op): one YOLOv8n
+  ONNX forward pass per sampled frame serves both heads (refactored
+  `predict()` + `detect_from()`; inference halved vs two passes, ~19 ms/frame
+  full-res). The follow point is the tallest top-k `person` box (closest to
+  camera = the close-up the broadcast is showing; edge-down-weighted so
+  players walking out of frame don't drag the crop), with the ball used only
+  when trusted (conf >= `ball_trust` 0.30) and continuous (near last pos).
+  Greedy link gate 288 px/frame, lost-streak resync after 3 s, weak-cluster
+  gate via `cluster_trust` (0 = accept all). Full-resolution sampling
+  (`max_width: 0`): verified 960 px downscale collapses the cluster to 1/75
+  samples while full-res tracks 61-74/75. New config: `ball_trust`,
+  `cluster_trust`, `resync_after_lost_seconds`, `person_confidence` 0.25.
+- Verified on real footage: short.webm goal window (135-160 s) 61/75 tracked
+  with the celebration zoom kept in frame (t=147/149/152 frames checked);
+  goal2.webm (10-35 s) 73/75, max jump 182 px, no teleports. Frame-by-frame
+  person dump (`/tmp/opencode/real/short_persons.json`, throwaway) confirmed
+  tallest-box selection tracks the zoomed celebration, not the still group.
+- Render: full-height crop (`w=ih*9/16`) panned by FFmpeg `sendcmd` driving
+  `crop x` at 5 cmds/s (verified on FFmpeg 9: red-left/blue-right fixture
+  flips color exactly at the command timestamp), then `scale=1080:1920`.
+  Smoothing is pure/unit-tested: nearest-sample targets, hold-last
+  (`lost_hold_seconds`), smoothstep ease-to-center (`recenter_seconds`),
+  moving average, max-pan-speed clamp, bounds clamp.
+- Synthetic fixture: `scripts/make_synthetic_match.ts` overlays a trackable
+  r=20 disc per goal in a chunked second pass; E2E asserts twins per goal.
+- Tests: typecheck clean, 46 TS unit + 20 python unittest pass
+  (`PYTHONPATH=python ... discover`), proxy render test rewritten onto the
+  two real goal windows (25 s each, 1080x1920, >=60% tracked, travel >200 px).
+  Full synthetic E2E not runnable on this Mac (no `drawtext` in Homebrew
+  FFmpeg).
+- Benchmark reports `vertical_coverage` alongside the PRD §34 metrics.
+- UI: results table shows both clip buttons per row; settings card shows the
+  vertical spec.
+- Known limits: only horizontal pan (full-height crop leaves no Y room);
+  the ball head is opportunistic (real-ball conf ~0.05-0.8 when close, mostly
+  absent); celebration zoom keeps players, not the ball, in frame — that is
+  the intended behavior; FootAndBall-style dedicated ball models checked,
+  no maintained repo/weights found (only a temporal-fusion fork referencing
+  the original architecture).
+
+---
+
 ## 2026-09-02 — Streaming OCR and temporal reuse
 
 - Replaced the coarse/fine scan PNG handoff with a raw BGR24 pipe from FFmpeg

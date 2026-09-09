@@ -95,12 +95,26 @@ export interface EventSignals {
   keyword_goal?: boolean
 }
 
+export type ClipVariant = 'horizontal' | 'vertical'
+
+export interface VerticalTrackingSummary {
+  samples: number
+  tracked: number
+  fallback: boolean
+  mean_confidence?: number
+}
+
 export interface ClipInfo {
   path: string
   startSeconds: number
   endSeconds: number
   durationSeconds: number
   reencoded: boolean
+  /** Clip orientation variant. Defaults to 'horizontal' for backwards compat. */
+  variant?: ClipVariant
+  width?: number
+  height?: number
+  tracking?: VerticalTrackingSummary
 }
 
 export interface DetectedEvent {
@@ -115,6 +129,8 @@ export interface DetectedEvent {
   score_after?: string
   signals: EventSignals
   clip?: ClipInfo
+  /** Action-following 9:16 twin. Flat file alongside `clip` (same window). */
+  clip_vertical?: ClipInfo
 }
 
 export interface ClipRequest {
@@ -177,6 +193,9 @@ export interface AnalysisMetadata {
   score_changes_detected: number
   goal_events_created: number
   clips_created: number
+  /** 9:16 vertical twins cut alongside the horizontal clips. */
+  vertical_clips_created?: number
+  vertical_center_fallbacks?: number
   processing_seconds: number
   degraded: string[]
   config_used: unknown

@@ -33,6 +33,7 @@ interface VideoReport {
   timestampErrors: number[]
   clipCovered: number
   correctDetections: number
+  verticalOk: number
 }
 
 function matchEvent(event: DetectedEvent, truthEvents: Truth['events'], tolerance = 10) {
@@ -124,6 +125,7 @@ async function main(): Promise<number> {
     const timestampErrors: number[] = []
     let clipCovered = 0
     let truePositives = 0
+    let verticalOk = 0
     for (const g of goals) {
       const t = matchEvent(g, truth.events)
       if (t && !matchedTruth.has(truth.events.indexOf(t))) {
@@ -132,6 +134,14 @@ async function main(): Promise<number> {
         timestampErrors.push(Math.abs(g.event_time - t.timestamp))
         if (g.clip && g.clip.startSeconds <= g.event_time && g.clip.endSeconds >= g.event_time) {
           clipCovered++
+        }
+        if (
+          g.clip_vertical &&
+          Math.abs(g.clip_vertical.durationSeconds - (g.clip?.durationSeconds ?? 0)) <= 1.0 &&
+          g.clip_vertical.width === 1080 &&
+          g.clip_vertical.height === 1920
+        ) {
+          verticalOk++
         }
       }
     }
@@ -144,11 +154,12 @@ async function main(): Promise<number> {
       duplicates,
       timestampErrors,
       clipCovered,
-      correctDetections: truePositives
+      correctDetections: truePositives,
+      verticalOk
     })
 
     console.log(
-      `detected=${goals.length} matched=${truePositives}/${truthGoals.length} duplicates=${duplicates}`
+      `detected=${goals.length} matched=${truePositives}/${truthGoals.length} duplicates=${duplicates} vertical=${verticalOk}/${truePositives}`
     )
   }
 
@@ -161,6 +172,7 @@ async function main(): Promise<number> {
   const median = errors.length ? errors[Math.floor(errors.length / 2)] : 0
   const correctDetections = reports.reduce((n, r) => n + r.correctDetections, 0)
   const clipCovered = reports.reduce((n, r) => n + r.clipCovered, 0)
+  const verticalOk = reports.reduce((n, r) => n + r.verticalOk, 0)
 
   const summary = {
     videos: reports.length,
@@ -169,6 +181,7 @@ async function main(): Promise<number> {
     duplicate_rate: totalDetected ? totalDuplicates / totalDetected : 0,
     median_timestamp_error_seconds: median,
     clip_coverage: correctDetections ? clipCovered / correctDetections : 0,
+    vertical_coverage: correctDetections ? verticalOk / correctDetections : 0,
     targets: {
       goal_recall: '>= 0.90',
       goal_precision: '>= 0.95',
@@ -190,6 +203,7 @@ async function main(): Promise<number> {
   console.log(`Duplicate rate:         ${summary.duplicate_rate.toFixed(3)}  (target 0)`)
   console.log(`Median timestamp error: ${median.toFixed(2)}s  (target <= 3s)`)
   console.log(`Clip coverage:          ${(summary.clip_coverage * 100).toFixed(1)}%  (target >= 95%)`)
+  console.log(`Vertical coverage:      ${(summary.vertical_coverage * 100).toFixed(1)}%  (target >= 95%)`)
   console.log(`\nDetails: ${summaryPath}`)
   return 0
 }

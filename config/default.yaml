@@ -46,13 +46,42 @@ goal_detection:
     agreeing_signals: 0.05
 
 clips:
-  goal_pre_roll_seconds: 20
-  goal_post_roll_seconds: 12
-  max_clip_seconds: 40
+  goal_pre_roll_seconds: 25
+  goal_post_roll_seconds: 10
+  max_clip_seconds: 35
   create_clips_for_unknown: false # UNKNOWN_INTERESTING events get no clips in v0.1
   encoding: reencode              # reencode = accurate cuts (preferred); copy = fast
   video_crf: 23
   video_preset: veryfast
+
+# Action-following 9:16 vertical twins. One vertical clip is generated for
+# every horizontal goal clip (same time window, same audio, flat `clips/`
+# layout). The crop follows the main player cluster (COCO person, always
+# visible on real broadcasts); the ball (COCO sports-ball) is used
+# opportunistically when the model actually sees it.
+# model_path is resolved relative to the project root; the model is fetched
+# with `python/track/download_model.py` (git-ignored, ~13 MB).
+vertical:
+  enabled: true
+  width: 1080
+  height: 1920
+  track_sample_fps: 6            # action position samples per second
+  model_path: python/track/models/ball.onnx
+  min_confidence: 0.05           # ball sightings below this are ignored (cluster still applies)
+  ball_trust: 0.20               # ball must reach this to override the cluster
+  person_confidence: 0.25        # person boxes below this are ignored by the cluster
+  person_iou: 0.5                # NMS IoU threshold for the person pass
+  cluster_top_k: 6               # tallest of the top-k person boxes is the action
+  cluster_padding: 60            # padding around the player span, source pixels
+  cluster_trust: 0.0             # min cluster confidence to link (0 = accept all)
+  resync_after_lost_seconds: 3.0 # re-seed the track after this long lost
+  smoothing_window_seconds: 0.6  # moving-average window for the crop center
+  sample_fps: 6                  # tracker rate the smoothing gap detection assumes
+  max_pan_speed: 1             # max crop-center travel, fraction of width per second
+  lost_hold_seconds: 1.5         # hold last position after losing the action
+  recenter_seconds: 1.0          # then ease back to center over this long
+  video_preset: veryfast
+  video_crf: 23
 
 output:
   dir: output

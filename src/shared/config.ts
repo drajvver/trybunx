@@ -56,9 +56,47 @@ export interface AppConfig {
     video_crf: number
     video_preset: string
   }
+  vertical: VerticalClipConfig
   output: {
     dir: string
   }
+}
+
+export interface VerticalClipConfig {
+  enabled: boolean
+  width: number
+  height: number
+  /** Action position samples per second for the tracking pass. */
+  track_sample_fps: number
+  model_path: string
+  /** Ball sightings below this are ignored (the player cluster still applies). */
+  min_confidence: number
+  /** Ball must reach this confidence to override the cluster. */
+  ball_trust: number
+  /** Person boxes below this are ignored by the cluster. */
+  person_confidence: number
+  /** NMS IoU threshold for the person pass. */
+  person_iou: number
+  /** Tallest of the top-k person boxes is the action. */
+  cluster_top_k: number
+  /** Padding around the player span, in source pixels. */
+  cluster_padding: number
+  /** Min cluster confidence to link (0 = accept all). */
+  cluster_trust: number
+  /** Re-seed the track after this long lost (seconds). */
+  resync_after_lost_seconds: number
+  /** Moving-average smoothing window for the crop center (seconds). */
+  smoothing_window_seconds: number
+  /** Tracker sample rate the smoothing math was built for (gap detection). */
+  sample_fps: number
+  /** Maximum horizontal pan speed as a fraction of frame width per second. */
+  max_pan_speed: number
+  /** Hold the last known position this long after the action is lost. */
+  lost_hold_seconds: number
+  /** Ease back to center over this long when the action stays lost. */
+  recenter_seconds: number
+  video_preset: string
+  video_crf: number
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -114,6 +152,28 @@ export const DEFAULT_CONFIG: AppConfig = {
     encoding: 'reencode',
     video_crf: 23,
     video_preset: 'veryfast'
+  },
+  vertical: {
+    enabled: true,
+    width: 1080,
+    height: 1920,
+    track_sample_fps: 3,
+    model_path: 'python/track/models/ball.onnx',
+    min_confidence: 0.05,
+    ball_trust: 0.3,
+    person_confidence: 0.25,
+    person_iou: 0.5,
+    cluster_top_k: 6,
+    cluster_padding: 60,
+    cluster_trust: 0,
+    resync_after_lost_seconds: 3,
+    smoothing_window_seconds: 0.6,
+    sample_fps: 3,
+    max_pan_speed: 0.6,
+    lost_hold_seconds: 1.5,
+    recenter_seconds: 1.0,
+    video_preset: 'veryfast',
+    video_crf: 23
   },
   output: {
     dir: 'output'
@@ -199,5 +259,37 @@ function validateConfig(cfg: AppConfig): void {
   if (cfg.clips.max_clip_seconds <= 0) throw new Error('clips.max_clip_seconds must be > 0')
   if (cfg.clips.encoding !== 'reencode' && cfg.clips.encoding !== 'copy') {
     throw new Error('clips.encoding must be "reencode" or "copy"')
+  }
+  const v = (cfg as AppConfig).vertical
+  if (v) {
+    if (v.width <= 0 || v.height <= 0) throw new Error('vertical.width/height must be > 0')
+    if (v.track_sample_fps <= 0 || v.track_sample_fps > 30) {
+      throw new Error('vertical.track_sample_fps must be in (0, 30]')
+    }
+    if (v.min_confidence < 0 || v.min_confidence > 1) {
+      throw new Error('vertical.min_confidence must be in [0, 1]')
+    }
+    if (v.person_confidence < 0 || v.person_confidence > 1) {
+      throw new Error('vertical.person_confidence must be in [0, 1]')
+    }
+    if (v.person_iou < 0 || v.person_iou > 1) {
+      throw new Error('vertical.person_iou must be in [0, 1]')
+    }
+    if (v.cluster_top_k < 1) throw new Error('vertical.cluster_top_k must be >= 1')
+    if (v.cluster_padding < 0) throw new Error('vertical.cluster_padding must be >= 0')
+    if (v.ball_trust < 0 || v.ball_trust > 1) {
+      throw new Error('vertical.ball_trust must be in [0, 1]')
+    }
+    if (v.cluster_trust < 0 || v.cluster_trust > 1) {
+      throw new Error('vertical.cluster_trust must be in [0, 1]')
+    }
+    if (v.resync_after_lost_seconds < 0) {
+      throw new Error('vertical.resync_after_lost_seconds must be >= 0')
+    }
+    if (v.smoothing_window_seconds < 0) throw new Error('vertical.smoothing_window_seconds must be >= 0')
+    if (v.max_pan_speed <= 0) throw new Error('vertical.max_pan_speed must be > 0')
+    if (v.lost_hold_seconds < 0) throw new Error('vertical.lost_hold_seconds must be >= 0')
+    if (v.recenter_seconds < 0) throw new Error('vertical.recenter_seconds must be >= 0')
+    if (v.video_crf < 0 || v.video_crf > 51) throw new Error('vertical.video_crf must be in [0, 51]')
   }
 }

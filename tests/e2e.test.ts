@@ -22,6 +22,17 @@ interface TruthFile {
   events: Array<{ type: string; timestamp: number; scoreboard_update: number; score_after: string }>
 }
 
+interface E2EClip {
+  path: string
+  durationSeconds: number
+  startSeconds: number
+  endSeconds: number
+  variant?: string
+  width?: number
+  height?: number
+  tracking?: { samples: number; tracked: number; fallback: boolean; mean_confidence?: number }
+}
+
 interface E2EEvent {
   id: string
   type: string
@@ -30,7 +41,8 @@ interface E2EEvent {
   confidence: number
   score_before?: string
   score_after?: string
-  clip?: { path: string; durationSeconds: number; startSeconds: number; endSeconds: number }
+  clip?: E2EClip
+  clip_vertical?: E2EClip
 }
 
 beforeAll(async () => {
@@ -114,7 +126,8 @@ describe('end-to-end pipeline on synthetic VOD', () => {
 
     const clipsDir = resolve(OUTPUT, 'e2e_run', 'clips')
     const files = readdirSync(clipsDir).filter((f) => f.endsWith('.mp4'))
-    expect(files).toHaveLength(truth.events.length)
+    // Horizontal clip + flat 9:16 vertical twin per goal.
+    expect(files).toHaveLength(truth.events.length * 2)
 
     for (const goal of goals) {
       expect(goal.clip).toBeDefined()
@@ -130,5 +143,34 @@ describe('end-to-end pipeline on synthetic VOD', () => {
 
     // Clip naming: goal_01_1m20s.mp4 style (PRD section 7).
     expect(files[0]).toMatch(/^goal_01_\d+m\d+s\.mp4$/)
+  })
+
+  it('generates one 9:16 vertical twin per goal with the same window', () => {
+    const truth = JSON.parse(readFileSync(TRUTH, 'utf8')) as TruthFile
+    const goals = events.filter((e) => e.type === 'GOAL')
+    expect(goals).toHaveLength(truth.events.length)
+
+    const clipsDir = resolve(OUTPUT, 'e2e_run', 'clips')
+    const verticalFiles = readdirSync(clipsDir)
+      .filter((f) => f.endsWith('_vertical.mp4'))
+      .sort()
+    expect(verticalFiles).toHaveLength(truth.events.length)
+    expect(verticalFiles[0]).toMatch(/^goal_01_\d+m\d+s_vertical\.mp4$/)
+
+    for (const goal of goals) {
+      expect(goal.clip_vertical).toBeDefined()
+      const v = goal.clip_vertical!
+      expect(v.variant).toBe('vertical')
+      expect(v.width).toBe(1080)
+      expect(v.height).toBe(1920)
+      // Same window and same audio length as the horizontal clip.
+      expect(v.startSeconds).toBeCloseTo(goal.clip!.startSeconds, 2)
+      expect(v.endSeconds).toBeCloseTo(goal.clip!.endSeconds, 2)
+      expect(Math.abs(v.durationSeconds - goal.clip!.durationSeconds)).toBeLessThanOrEqual(1.0)
+      expect(statSync(v.path).size).toBeGreaterThan(10 * 1024)
+      // The synthetic ball is trackable: the tracker must find it.
+      expect(v.tracking?.samples ?? 0).toBeGreaterThan(10)
+      expect(v.tracking?.fallback).toBe(false)
+    }
   })
 })
