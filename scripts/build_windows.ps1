@@ -1,6 +1,13 @@
 # Developer/CI build entry point. End users only run the resulting installer.
 param([switch]$PrepareOnly, [ValidateSet("cu130", "cpu")][string]$TorchBackend = "cu130")
 $ErrorActionPreference = "Stop"
+# Windows PowerShell started through an intermediate process (pwsh -> npm/cmd
+# -> powershell) inherits PowerShell 7's module paths, which makes module
+# auto-loading resolve incompatible 7.0.0.0 modules and break cmdlets such as
+# Get-FileHash. Restore the Windows PowerShell module paths before anything else.
+if ($PSVersionTable.PSEdition -eq "Desktop" -and $env:PSModulePath -match '(?i)[\\/]PowerShell[\\/]7|[\\/]Program Files[\\/]PowerShell[\\/]Modules|[\\/]Documents[\\/]PowerShell[\\/]Modules|[\\/]WindowsApps[\\/][^;]*PowerShell') {
+    $env:PSModulePath = "$HOME\Documents\WindowsPowerShell\Modules;$env:ProgramFiles\WindowsPowerShell\Modules;$PSHOME\Modules"
+}
 if ($env:OS -ne "Windows_NT") { throw "Build this installer on Windows x64." }
 Set-Location (Split-Path $PSScriptRoot -Parent)
 function Run {
