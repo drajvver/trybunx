@@ -23,7 +23,8 @@
     "python:setup:portable": "bash python/setup.sh --portable",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:linux": "electron-vite build && electron-builder --linux",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "dist:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_windows.ps1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

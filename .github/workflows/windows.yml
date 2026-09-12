@@ -1,0 +1,41 @@
+name: Windows installer
+on:
+  workflow_dispatch:
+  push:
+    branches: ["build/windows-*"]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run dist:win
+      - name: Verify packaged resources
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$pwd/dist/win-unpacked/resources/python/vendor;$pwd/dist/win-unpacked/resources/python"
+          & "dist/win-unpacked/resources/runtime/python.exe" scripts/verify_windows_bundle.py dist/win-unpacked/resources
+          if ($LASTEXITCODE -ne 0) { throw "Packaged runtime verification failed" }
+      - name: Install and launch application
+        shell: pwsh
+        run: |
+          $Installer = Get-ChildItem dist/Trybunx-Setup-*-x64.exe | Select-Object -First 1
+          $InstallDir = Join-Path $env:RUNNER_TEMP "Trybunx installed app"
+          $Process = Start-Process $Installer.FullName -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
+          if ($Process.ExitCode -ne 0) { throw "Installer failed" }
+          npx tsx scripts/smoke_windows_app.ts "$InstallDir/TrybunaTV AI Clip Hunter.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Installed application failed to launch" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Trybunx-Windows-x64
+          path: dist/Trybunx-Setup-*-x64.exe
+          if-no-files-found: error

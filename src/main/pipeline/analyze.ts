@@ -1,3 +1,4 @@
+import { delimiter } from 'path'
 import { existsSync } from 'fs'
 import { mkdir, rm, writeFile } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
@@ -80,8 +81,8 @@ function workerEnvironment(vendorCandidates: string[], pythonEnv?: NodeJS.Proces
   const env: NodeJS.ProcessEnv = { ...pythonEnv }
   const vendorDirs = vendorCandidates.filter((dir) => existsSync(dir))
   if (vendorDirs.length > 0) {
-    const extra = vendorDirs.join(':')
-    env.PYTHONPATH = env.PYTHONPATH ? `${extra}:${env.PYTHONPATH}` : extra
+    const extra = vendorDirs.join(delimiter)
+    env.PYTHONPATH = env.PYTHONPATH ? `${extra}${delimiter}${env.PYTHONPATH}` : extra
   }
   return env
 }

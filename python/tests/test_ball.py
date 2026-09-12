@@ -1,5 +1,6 @@
 """Ball tracker tests: NMS, letterbox math, detection thresholding, clustering."""
 import unittest
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -8,6 +9,19 @@ from track.ball import BallTracker, cluster_persons, select_action_target
 
 def _tracker() -> BallTracker:
     return BallTracker.__new__(BallTracker)
+
+
+class ModelContractTests(unittest.TestCase):
+    def test_reads_football_class_map_and_input_size(self):
+        session = Mock()
+        session.get_inputs.return_value = [Mock(name='input', shape=[1,3,1280,1280])]
+        session.get_modelmeta.return_value.custom_metadata_map = {
+            'names': "{0: 'ball', 1: 'goalkeeper', 2: 'player', 3: 'referee'}"}
+        with patch('track.ball.ort.InferenceSession', return_value=session):
+            tracker = BallTracker('football.onnx')
+        self.assertEqual(tracker.INPUT_SIZE, 1280)
+        self.assertEqual(tracker.ball_class, 0)
+        self.assertEqual(tracker.person_classes, [1,2])
 
 
 class NmsTests(unittest.TestCase):
@@ -30,6 +44,11 @@ class NmsTests(unittest.TestCase):
 
 
 class PreprocessTests(unittest.TestCase):
+    def test_converts_bgr_to_rgb(self) -> None:
+        image = np.full((640, 640, 3), [10, 80, 240], dtype=np.uint8)
+        tensor, *_ = _tracker()._preprocess(image)
+        np.testing.assert_allclose(tensor[0, :, 100, 100], np.array([240, 80, 10]) / 255)
+
     def test_letterboxes_wide_frame(self) -> None:
         tracker = _tracker()
         image = np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -196,6 +215,19 @@ class SelectActionTargetTests(unittest.TestCase):
         )
         assert target is not None
         self.assertEqual(target["kind"], "ball")
+
+    def test_nearby_ball_survives_stronger_teleporting_candidate(self) -> None:
+        target = select_action_target(
+            [self._ball(100, 0.95), self._ball(1210, 0.7)],
+            self._cluster(1200), (1200, 600), max_jump_px=150,
+        )
+        self.assertEqual(target, self._ball(1210, 0.7))
+
+    def test_diagonal_motion_uses_euclidean_distance(self) -> None:
+        target = select_action_target(
+            [self._ball(1300, 0.8)], None, (1200, 600), max_jump_px=150,
+        )
+        self.assertIsNotNone(target)
 
     def test_weak_ball_ignored(self) -> None:
         target = select_action_target(

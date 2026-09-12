@@ -77,13 +77,34 @@ describe('computeTrajectory', () => {
 })
 
 describe('buildSendcmd', () => {
+  it('updates every frame so smooth motion is not reduced to five jumps per second', () => {
+    const xs = Array.from({ length: 120 }, (_, i) => i * 2)
+    const cmd = buildSendcmd({ xs, fps: 60, cropWidth: 607, cropHeight: 1080, fallback: false })
+    const lines = cmd.trim().split('\n')
+    expect(lines).toHaveLength(xs.length)
+    for (let i = 0; i < lines.length; i++) {
+      const timestamp = Number(lines[i].split(' ')[0])
+      expect(timestamp).toBeLessThanOrEqual(i / 60)
+      expect(i / 60 - timestamp).toBeLessThan(0.0000011)
+      expect(lines[i]).toContain(`crop x ${xs[i]};`)
+    }
+  })
+
+  it('keeps fractional-rate commands aligned to their frames', () => {
+    const fps = 30000 / 1001
+    const xs = Array.from({ length: 90 }, (_, i) => i)
+    const lines = buildSendcmd({ xs, fps, cropWidth: 405, cropHeight: 720, fallback: false }).trim().split('\n')
+    expect(lines).toHaveLength(xs.length)
+    lines.forEach((line, i) => expect(Number(line.split(' ')[0])).toBeLessThanOrEqual(i / fps))
+  })
+
   it('emits valid sendcmd lines within the clip duration', () => {
     const traj = computeTrajectory([sample(0, 640), sample(4, 640)], 0, 5, W, H, 25, CFG)
     const cmd = buildSendcmd(traj, 5)
     const lines = cmd.trim().split('\n')
     expect(lines.length).toBeGreaterThan(3)
     for (const line of lines) {
-      expect(line).toMatch(/^\d+\.\d{3} crop x \d+;$/)
+      expect(line).toMatch(/^\d+\.\d{6} crop x \d+;$/)
       const t = parseFloat(line.split(' ')[0])
       expect(t).toBeLessThanOrEqual(5)
     }

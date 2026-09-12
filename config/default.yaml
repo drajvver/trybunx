@@ -67,6 +67,8 @@ vertical:
   height: 1920
   track_sample_fps: 6            # action position samples per second
   model_path: python/track/models/ball.onnx
+  ball_model_path: python/track/models/football.pt # football-specific detector, tracking extra
+  ball_input_size: 2560          # preserve the distant ball; MPS/CUDA used when available
   min_confidence: 0.05           # ball sightings below this are ignored (cluster still applies)
   ball_trust: 0.20               # ball must reach this to override the cluster
   person_confidence: 0.25        # person boxes below this are ignored by the cluster
@@ -75,7 +77,7 @@ vertical:
   cluster_padding: 60            # padding around the player span, source pixels
   cluster_trust: 0.0             # min cluster confidence to link (0 = accept all)
   resync_after_lost_seconds: 3.0 # re-seed the track after this long lost
-  smoothing_window_seconds: 0.6  # moving-average window for the crop center
+  smoothing_window_seconds: 1.0  # moving-average window for the crop center
   sample_fps: 6                  # tracker rate the smoothing gap detection assumes
   max_pan_speed: 1             # max crop-center travel, fraction of width per second
   lost_hold_seconds: 1.5         # hold last position after losing the action

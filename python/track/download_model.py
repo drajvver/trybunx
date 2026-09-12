@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download the ball-tracking ONNX model (YOLOv8n, COCO sports-ball class).
 
-Usage: python track/download_model.py [--force]
+Usage: python track/download_model.py [--football] [--force]
 
 The model is Ultralytics YOLOv8n exported to ONNX (~12 MB). It runs on CPU via
 the existing onnxruntime dependency; no torch/ultralytics install needed.
@@ -29,9 +29,20 @@ def sha256_of(path: Path) -> str:
 
 
 def main() -> int:
+    global MODEL_URL, MODEL_PATH, EXPECTED_SHA256, EXPECTED_SIZE
     force = "--force" in sys.argv[1:]
+    if "--football" in sys.argv[1:]:
+        # Immutable upstream revision; YOLOv8x football fine-tune (AGPL-3.0).
+        MODEL_URL = ("https://huggingface.co/gianpaj/football-players-detection-1/resolve/"
+                     "19ff0a8196ba3839d67acead4d7983692e8b79ff/weights/best.pt")
+        MODEL_PATH = Path(__file__).parent / "models" / "football.pt"
+        EXPECTED_SHA256 = "a35ca40ea9e728288b86b37f728afbe601dfd7ec58f30d4661900c2d9b308932"
+        EXPECTED_SIZE = 0
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     if MODEL_PATH.exists() and not force:
+        if sha256_of(MODEL_PATH) != EXPECTED_SHA256:
+            print("existing model checksum mismatch; rerun with --force", file=sys.stderr)
+            return 1
         print(f"model already present: {MODEL_PATH} ({MODEL_PATH.stat().st_size} bytes)")
         return 0
     print(f"downloading {MODEL_URL} ...")
@@ -39,11 +50,13 @@ def main() -> int:
     urllib.request.urlretrieve(MODEL_URL, tmp)
     size = tmp.stat().st_size
     print(f"downloaded {size} bytes")
-    if size != EXPECTED_SIZE:
+    if EXPECTED_SIZE and size != EXPECTED_SIZE:
         print(f"WARNING: expected {EXPECTED_SIZE} bytes, got {size}", file=sys.stderr)
     digest = sha256_of(tmp)
     if digest != EXPECTED_SHA256:
-        print(f"WARNING: sha256 mismatch: {digest}", file=sys.stderr)
+        print(f"ERROR: sha256 mismatch: {digest}", file=sys.stderr)
+        tmp.unlink(missing_ok=True)
+        return 1
     else:
         print(f"sha256 OK: {digest}")
     tmp.replace(MODEL_PATH)

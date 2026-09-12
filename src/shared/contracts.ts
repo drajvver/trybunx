@@ -102,6 +102,10 @@ export interface VerticalTrackingSummary {
   tracked: number
   fallback: boolean
   mean_confidence?: number
+  ball_observations?: number
+  ball_interpolated?: number
+  fallback_reason?: 'tracking_failed'
+  error?: string
 }
 
 export interface ClipInfo {

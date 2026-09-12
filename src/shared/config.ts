@@ -69,6 +69,9 @@ export interface VerticalClipConfig {
   /** Action position samples per second for the tracking pass. */
   track_sample_fps: number
   model_path: string
+  /** Optional football-specific PyTorch detector; requires the tracking Python extra. */
+  ball_model_path: string
+  ball_input_size: number
   /** Ball sightings below this are ignored (the player cluster still applies). */
   min_confidence: number
   /** Ball must reach this confidence to override the cluster. */
@@ -159,6 +162,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     height: 1920,
     track_sample_fps: 3,
     model_path: 'python/track/models/ball.onnx',
+    ball_model_path: '',
+    ball_input_size: 2560,
     min_confidence: 0.05,
     ball_trust: 0.3,
     person_confidence: 0.25,
@@ -167,7 +172,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     cluster_padding: 60,
     cluster_trust: 0,
     resync_after_lost_seconds: 3,
-    smoothing_window_seconds: 0.6,
+    smoothing_window_seconds: 1.0,
     sample_fps: 3,
     max_pan_speed: 0.6,
     lost_hold_seconds: 1.5,

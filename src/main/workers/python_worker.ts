@@ -52,6 +52,7 @@ export class PythonWorker {
     this.starting = (async () => {
       this.dead = false
       const child = spawn(this.opts.pythonPath, [this.opts.scriptPath], {
+        windowsHide: true,
         cwd: this.opts.cwd,
         env: this.opts.env ? { ...process.env, ...this.opts.env } : process.env,
         stdio: ['pipe', 'pipe', 'pipe']

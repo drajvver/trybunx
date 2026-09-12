@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { resourceRoot } from '../paths'
 
 export interface RunOptions {
   /** AbortSignal to cancel the process (SIGTERM, then SIGKILL). */
@@ -46,6 +47,9 @@ export function resolveBinary(name: string): string {
   const fromEnv = process.env[envKey]
   if (fromEnv) return fromEnv
 
+  const bundled = join(resourceRoot(), 'bin', process.platform === 'win32' ? `${name}.exe` : name)
+  if (existsSync(bundled)) return bundled
+
   const fallback = BINARY_FALLBACK_DIRS.map((dir) => join(dir, name)).find((p) => existsSync(p))
   return fallback ?? name
 }
@@ -58,6 +62,7 @@ export function runProcess(
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
+      windowsHide: true,
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -125,7 +130,7 @@ export function spawnProcess(
   handlers: { onStdoutLine?: (line: string) => void; onStderr?: (chunk: string) => void },
   opts: RunOptions = {}
 ): { child: ReturnType<typeof spawn>; done: Promise<void> } {
-  const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn(cmd, args, { windowsHide: true, cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
   let buffer = ''
   child.stdout.on('data', (d: Buffer) => {
     buffer += d.toString()

@@ -1,3 +1,4 @@
+import { basename, resolve } from 'path'
 import { writeFile } from 'fs/promises'
 import { AppConfig } from '../../shared/config'
 import { resolveBinary, runProcess } from '../media/process'
@@ -47,6 +48,7 @@ export function verticalOutputPath(horizontalPath: string): string {
 export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<VerticalRenderResult> {
   const v = opts.cfg.vertical
   const duration = opts.window.end - opts.window.start
+  const fps = Number.isFinite(opts.sourceFps) && opts.sourceFps >= 1 ? opts.sourceFps : 25
 
   let xs: number[] | null = null
   let tracking: VerticalTrackingSummary = {
@@ -70,6 +72,8 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
       const tracked = track.samples.filter((s) => !s.lost)
       const confs = tracked.map((s) => s.confidence)
       tracking = {
+        ball_observations: tracked.filter(s => s.kind === 'ball' && !s.interpolated).length,
+        ball_interpolated: tracked.filter(s => s.kind === 'ball' && s.interpolated).length,
         samples: track.samples.length,
         tracked: tracked.length,
         fallback: tracked.length === 0,
@@ -84,7 +88,7 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
           opts.window.end,
           opts.sourceWidth,
           opts.sourceHeight,
-          Math.max(1, Math.round(opts.sourceFps)) || 25,
+          fps,
           v
         )
         xs = traj.xs
@@ -92,7 +96,7 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
       }
     } catch (err) {
       if ((err as Error).message === 'cancelled' || opts.signal?.aborted) throw err
-      tracking = { samples: 0, tracked: 0, fallback: true }
+      tracking = { samples: 0, tracked: 0, fallback: true, fallback_reason: 'tracking_failed', error: (err as Error).message }
     }
   }
   opts.onTracked?.(tracking)
@@ -101,10 +105,9 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
   let videoFilter: string
   let cmdPath: string | null = null
   if (xs && !tracking.fallback) {
-    const fps = Math.max(1, Math.round(opts.sourceFps)) || 25
     cmdPath = `${opts.tempDir}/vertical_${Date.now()}_${Math.floor(Math.random() * 1e6)}.cmd`
     await writeFile(cmdPath, buildSendcmd({ xs, fps, cropWidth: cropW, cropHeight: opts.sourceHeight, fallback: false }))
-    videoFilter = `sendcmd=f=${cmdPath},crop=${cropW}:${opts.sourceHeight}:x=0:y=0,scale=${v.width}:${v.height}:flags=lanczos`
+    videoFilter = `fps=${fps},sendcmd=f=${basename(cmdPath)},crop=${cropW}:${opts.sourceHeight}:x=0:y=0,scale=${v.width}:${v.height}:flags=lanczos`
   } else {
     videoFilter = `crop=${cropW}:${opts.sourceHeight},scale=${v.width}:${v.height}:flags=lanczos`
   }
@@ -115,7 +118,7 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
       [
         '-hide_banner', '-loglevel', 'error', '-nostdin',
         '-ss', opts.window.start.toFixed(3),
-        '-i', opts.inputPath,
+        '-i', resolve(opts.inputPath),
         '-t', duration.toFixed(3),
         '-vf', videoFilter,
         '-c:v', 'libx264',
@@ -125,9 +128,9 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
         '-b:a', '192k',
         '-movflags', '+faststart',
         '-avoid_negative_ts', 'make_zero',
-        '-y', opts.outputPath
+        '-y', resolve(opts.outputPath)
       ],
-      { signal: opts.signal, timeoutSeconds: 1800 }
+      { signal: opts.signal, timeoutSeconds: 1800, cwd: resolve(opts.tempDir) }
     )
   } finally {
     if (cmdPath) {

@@ -92,19 +92,39 @@ logs/analysis.log  per-sample detection log for tuning
 Every goal produces two clips of the same window with identical audio: the
 horizontal original and an action-following 9:16 vertical twin
 (`*_vertical.mp4`, 1080x1920, flat in `clips/`). The vertical crop keeps full
-source height and pans horizontally after the action: the Python worker runs
-one YOLOv8n ONNX pass per sampled frame (~3 samples/s) and follows the
-tallest close-up player (COCO `person`, the close-up the broadcast is
-showing), switching to the ball (COCO `sports-ball`) only when it is seen
-confidently and continuously. Trajectory is smoothed with hold-last +
-ease-to-center when the action is lost. Fetch the model once with:
+source height and pans horizontally. Crop positions update every video frame,
+with a centered 1-second smoothing window to avoid stepped pans. No padding
+or landscape inset is used.
+
+The default YAML enables a football-trained YOLOv8x detector at 2560px,
+using Apple Silicon MPS or CUDA when available (CPU otherwise). The original
+nano ONNX model supplies person detections for fallback. Ball candidates are
+filtered against the wide-shot player/grass region, confirmed across nearby
+frames, and associated independently of players. Short gaps interpolate;
+reacquisition can anticipate the pan by up to 0.75 seconds, and loss holds the
+last ball position for up to 3 seconds before returning to the player fallback.
+These estimates are marked separately from observed ball detections.
+
+Install the heavier optional runtime and both models once:
 
 ```bash
-python/track/download_model.py   # ~13 MB, git-ignored
+uv sync --project python --extra tracking
+python/.venv/bin/python python/track/download_model.py
+python/.venv/bin/python python/track/download_model.py --football
 ```
 
-If the model is missing, vertical clips degrade to a static center crop and
-the run records `vertical_center_fallback:<event>` instead of failing.
+The football checkpoint is about 130 MB, pinned to an upstream revision and
+verified by SHA-256. Its [model card](https://huggingface.co/gianpaj/football-players-detection-1)
+identifies it as AGPL-3.0. The runtime is local; videos are not uploaded.
+Set `vertical.ball_model_path: ""` to use only the faster legacy detector.
+Running `uv sync` again without `--extra tracking` removes the optional runtime.
+
+`clip_vertical.tracking` records observed and interpolated ball sample counts.
+Missing models or worker errors retain the existing static center-crop fallback
+and record the error in the tracking summary. This is still not guaranteed
+ball identity tracking: small balls, occlusion, aerial passes, and new camera
+angles can cause misses or false detections. The pitch plausibility checks are
+intended for wide green-pitch footage and may reject high aerial balls.
 
 ## Tuning
 

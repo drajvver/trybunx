@@ -64,9 +64,6 @@ describe('vertical render proxy (no OCR)', () => {
     await worker.start()
 
     const cfg = buildConfig({ defaultConfigPath: resolve(ROOT, 'config/default.yaml') })
-    // buildConfig reads model_path relative to the project root; the test may
-    // run from a different cwd, so resolve it to an absolute path.
-    cfg.vertical.model_path = resolve(ROOT, cfg.vertical.model_path)
     for (const c of availableCases) {
       const media = await probeMedia(c.input)
       const window = { start: c.start, end: c.end }
@@ -128,7 +125,6 @@ describe('vertical render proxy (no OCR)', () => {
     await worker2.start()
     try {
       const cfg = buildConfig({ defaultConfigPath: resolve(ROOT, 'config/default.yaml') })
-      cfg.vertical.model_path = resolve(ROOT, cfg.vertical.model_path)
       const { trackBall } = await import('../src/main/vertical/tracker')
       const { computeTrajectory } = await import('../src/main/vertical/smoothing')
       const track = await trackBall({

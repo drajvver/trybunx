@@ -78,6 +78,9 @@ export function workerScriptPath(): string {
 export function pythonInterpreterPath(): string {
   if (process.env.TRYBUNX_PYTHON) return process.env.TRYBUNX_PYTHON
 
+  const bundled = join(resourceRoot(), 'runtime', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  if (existsSync(bundled)) return bundled
+
   for (const venvDir of ['python/.venv', '.venv']) {
     const python = venvPython(join(resolve(process.cwd()), venvDir))
     if (existsSync(python)) return python

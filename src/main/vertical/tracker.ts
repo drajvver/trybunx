@@ -1,5 +1,6 @@
 import { existsSync } from 'fs'
-import { isAbsolute, resolve } from 'path'
+import { resolve } from 'path'
+import { resourceRoot } from '../paths'
 import { PythonWorker } from '../workers/python_worker'
 import { resolveBinary } from '../media/process'
 import { AppConfig, clamp } from '../../shared/config'
@@ -15,6 +16,7 @@ export interface BallSample {
   confidence: number
   lost: boolean
   /** 'ball' = opportunistic ball sighting, 'cluster' = player-cluster follow. */
+  interpolated?: boolean
   kind?: 'ball' | 'cluster'
 }
 
@@ -33,6 +35,7 @@ interface WorkerTrackResult {
     width?: number
     height?: number
     confidence?: number
+    interpolated?: boolean
     kind?: 'ball' | 'cluster'
     lost?: boolean
   }>
@@ -66,9 +69,9 @@ export interface TrackBallOptions {
 export async function trackBall(opts: TrackBallOptions): Promise<BallTrack> {
   opts.signal?.throwIfAborted()
   const modelPath = opts.cfg.vertical.model_path
-  const resolvedModel = isAbsolute(modelPath) || existsSync(modelPath)
-    ? modelPath
-    : resolve(process.cwd(), modelPath)
+  // The Python worker has its own cwd; always pass absolute resource paths.
+  const root = resourceRoot()
+  const resolvedModel = resolve(root, modelPath)
   if (!existsSync(resolvedModel)) {
     throw new Error(
       `Ball model not found at ${modelPath} (resolved ${resolvedModel}). ` +
@@ -84,6 +87,8 @@ export async function trackBall(opts: TrackBallOptions): Promise<BallTrack> {
       end: opts.end,
       sample_fps: opts.cfg.vertical.track_sample_fps,
       model_path: resolvedModel,
+      ball_model_path: opts.cfg.vertical.ball_model_path ? resolve(root, opts.cfg.vertical.ball_model_path) : '',
+      ball_input_size: opts.cfg.vertical.ball_input_size,
       min_confidence: opts.cfg.vertical.min_confidence,
       ball_trust: opts.cfg.vertical.ball_trust,
       person_confidence: opts.cfg.vertical.person_confidence,
@@ -109,6 +114,7 @@ export async function trackBall(opts: TrackBallOptions): Promise<BallTrack> {
     height: s.height ?? 0,
     confidence: s.confidence ?? 0,
     kind: s.kind,
+    interpolated: s.interpolated,
     lost: Boolean(s.lost) || s.confidence === undefined
   }))
 

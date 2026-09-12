@@ -7,6 +7,7 @@ this module never cuts clips itself (application boundary: PRD section 9).
 """
 from __future__ import annotations
 
+import ast
 import subprocess
 import time
 
@@ -36,6 +37,19 @@ class BallTracker:
             raise BallModelError(f"could not load ball model {model_path}: {exc}") from exc
         self.input_name = self.session.get_inputs()[0].name
         self._input_shape = self.session.get_inputs()[0].shape
+        # Exported football models may use 1280px inputs and a four-class head.
+        shape = self._input_shape
+        if len(shape) != 4 or not isinstance(shape[2], int) or shape[2] != shape[3]:
+            raise BallModelError("tracking requires a static square NCHW ONNX input")
+        self.INPUT_SIZE = shape[2]
+        metadata = self.session.get_modelmeta().custom_metadata_map
+        names = ast.literal_eval(metadata.get("names", "{}"))
+        if isinstance(names, list):
+            names = dict(enumerate(names))
+        self.ball_class = next((int(i) for i, n in names.items() if n in ("ball", "sports ball", "sports-ball")), self.BALL_CLASS)
+        self.person_classes = [int(i) for i, n in names.items() if n in ("person", "player", "goalkeeper")]
+        if not self.person_classes:
+            self.person_classes = [self.PERSON_CLASS]
 
     def _preprocess(self, image: np.ndarray) -> tuple[np.ndarray, float, int, int]:
         """Letterbox a BGR frame to the square model input."""
@@ -47,7 +61,8 @@ class BallTracker:
         canvas = np.full((size, size, 3), 114, dtype=np.uint8)
         pad_x, pad_y = (size - new_width) // 2, (size - new_height) // 2
         canvas[pad_y : pad_y + new_height, pad_x : pad_x + new_width] = resized
-        tensor = canvas.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+        # FFmpeg/OpenCV supply BGR; the exported YOLO model expects RGB.
+        tensor = canvas[:, :, ::-1].transpose(2, 0, 1)[None].astype(np.float32) / 255.0
         return tensor, scale, pad_x, pad_y
 
     @staticmethod
@@ -143,7 +158,7 @@ class BallTracker:
         predicted = self.predict(image)
         return [
             {**d, "kind": "ball"}
-            for d in self.detect_from(predicted, image.shape, self.BALL_CLASS, min_confidence)
+            for d in self.detect_from(predicted, image.shape, getattr(self, "ball_class", self.BALL_CLASS), min_confidence)
         ]
 
     def detect_persons(
@@ -247,17 +262,19 @@ def select_action_target(
     stray early ball cannot latch the whole window to the wrong side.
     """
     trusted = [b for b in balls if b["confidence"] >= ball_trust]
-    best_ball = trusted[0] if trusted else None  # balls arrive conf-sorted
+    best_ball = max(trusted, key=lambda b: b["confidence"], default=None)
     if last_pos is None:
         if cluster is not None:
             return cluster
         return best_ball
-    if best_ball is not None:
-        jump = abs(best_ball["x"] - last_pos[0]) + abs(best_ball["y"] - last_pos[1])
-        if jump <= max_jump_px:
-            return best_ball
+    # Gate every candidate before ranking: a high-confidence false positive
+    # elsewhere must not hide the real ball near the existing track.
+    linked = [b for b in trusted
+              if np.hypot(b["x"] - last_pos[0], b["y"] - last_pos[1]) <= max_jump_px]
+    if linked:
+        return max(linked, key=lambda b: b["confidence"])
     if cluster is not None:
-        jump = abs(cluster["x"] - last_pos[0]) + abs(cluster["y"] - last_pos[1])
+        jump = float(np.hypot(cluster["x"] - last_pos[0], cluster["y"] - last_pos[1]))
         if jump <= max_jump_px * 2:
             return cluster
     return None
@@ -271,10 +288,9 @@ def track_ball_video(
 ) -> dict:
     """Sample full frames over [start, end) and follow the action per frame.
 
-    Detection runs once per frame; both heads come from the same forward
-    pass: the COCO `person` boxes locate the player cluster (always visible
-    on real broadcasts) while the `sports-ball` box is used opportunistically
-    when the model actually sees the ball.
+    The nano ONNX pass supplies player fallback positions. An optional
+    football-specific detector supplies high-resolution ball candidates.
+    Offline association confirms sightings and bridges short missing intervals.
 
     params: input_path, ffmpeg_path, start, end, sample_fps, model_path,
       min_confidence (ball), ball_trust, person_confidence, person_iou,
@@ -299,13 +315,19 @@ def track_ball_video(
     person_iou = float(params.get("person_iou", 0.5))
     cluster_top_k = max(1, int(params.get("cluster_top_k", 6)))
     cluster_padding = float(params.get("cluster_padding", 60.0))
-    # Full-resolution sampling: players and the ball are tiny at 960 px on a
-    # wide amateur pitch (verified: cluster collapses to 1/75 samples there
-    # while full-res persons read at 0.6-0.9). AV1 software decode of a few
-    # frames/sec is cheap next to the model; keep max_width as an opt-out.
+    # Avoid an extra resize before letterboxing. The model still sees a
+    # 640px input; full-resolution decoding does not increase model resolution.
     max_width = int(params.get("max_width", 0))
 
     tracker = BallTracker(model_path)
+    football = None
+    if params.get("ball_model_path"):
+        from track.football import FootballDetector
+        football = FootballDetector(str(params["ball_model_path"]), int(params.get("ball_input_size", 2560)))
+    from track.scenes import SceneDetector
+    scenes = SceneDetector()
+    from track.association import follow_ball
+    from track.football import plausible_balls
     started = time.perf_counter()
 
     scale_filter = f"scale=min(iw\\,{max_width}):-2" if max_width > 0 else "scale=iw:ih"
@@ -358,16 +380,17 @@ def track_ball_video(
     active_ffmpeg[0] = process
     ffmpeg_tracker[0] = process
     samples: list[dict] = []
+    candidate_frames: list[dict] = []
     inference_seconds = 0.0
-    # Greedy single-target track (see select_action_target): the player
-    # cluster is the backbone; trusted continuous ball sightings override it.
+    # Build the player fallback online; confirmed ball tracks override it offline.
     last_pos: tuple[float, float] | None = None
-    max_jump_px = max(48.0, source_width * 0.15) if source_width > 0 else 160.0
+    # Association stays in sampled-frame pixels; convert only the output.
+    max_jump_px = frame_width * 0.15
     # Per-frame link gate: allow fast action motion between consecutive
     # samples but reject teleports across the frame (verified on real
     # broadcasts: the action moves smoothly; a jump of half the frame in
     # 1/3 s is always a different player group, never the same action).
-    link_gate_px = max_jump_px
+    link_gate_px = max_jump_px * 3.0 / sample_fps
     # A trusted ball must be both confident and continuous; the greedy link
     # compares per-frame motion, so scale the teleport gate to the sample
     # rate (a 60 px/s player at 3 fps moves ~20 px/frame).
@@ -398,16 +421,20 @@ def track_ball_video(
             balls = [
                 {**d, "kind": "ball"}
                 for d in tracker.detect_from(
-                    predicted, image.shape, BallTracker.BALL_CLASS, min_confidence
+                    predicted, image.shape, tracker.ball_class, min_confidence
                 )
             ]
             persons = [
                 {**d, "kind": "person"}
+                for person_class in tracker.person_classes
                 for d in tracker.detect_from(
-                    predicted, image.shape, BallTracker.PERSON_CLASS,
+                    predicted, image.shape, person_class,
                     person_confidence, person_iou,
                 )
             ]
+            if football is not None:
+                balls = plausible_balls(image, football.detect(image, min_confidence), persons)
+            candidate_frames.append({"timestamp": timestamp, "balls": balls, "scene_id": scenes.update(image)})
             inference_seconds += time.perf_counter() - infer_start
             cluster = cluster_persons(
                 persons, cluster_top_k, cluster_padding,
@@ -417,7 +444,7 @@ def track_ball_video(
                 cluster = None
             anchor = None if lost_streak >= resync_after_lost else last_pos
             target = select_action_target(
-                balls, cluster, anchor,
+                [], cluster, anchor,
                 ball_trust=ball_trust, max_jump_px=link_gate_px,
             )
             best = None
@@ -430,7 +457,7 @@ def track_ball_video(
                     "height": target["height"] * scale_y,
                 }
             if best is not None:
-                last_pos = (best["x"], best["y"])
+                last_pos = (target["x"], target["y"])
                 lost_streak = 0
                 samples.append(
                     {
@@ -466,9 +493,20 @@ def track_ball_video(
             except subprocess.TimeoutExpired:
                 process.kill()
 
+    # Offline confirmation/interpolation owns a separate ball history. Player
+    # fallback positions never prevent acquiring a ball elsewhere on the pitch.
+    ball_track = follow_ball(candidate_frames, frame_width, ball_trust)
+    for i, ball in enumerate(ball_track):
+        if ball is not None:
+            samples[i] = {"timestamp": samples[i]["timestamp"], **ball,
+                          "x": round(ball["x"] * scale_x, 1),
+                          "y": round(ball["y"] * scale_y, 1),
+                          "width": round(ball["width"] * scale_x, 1),
+                          "height": round(ball["height"] * scale_y, 1)}
     confidences = [s["confidence"] for s in samples if "confidence" in s]
     return {
         "samples": samples,
+        **({"candidate_frames": candidate_frames} if params.get("diagnostics") else {}),
         "width": int(source_width or frame_width),
         "height": int(source_height or frame_height),
         "sample_count": len(samples),
