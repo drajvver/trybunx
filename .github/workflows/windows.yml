@@ -33,10 +33,18 @@ jobs:
           # The web installer uses the app package next to it instead of downloading.
           if (-not (Get-ChildItem dist/nsis-web/trybunx-clip-hunter-*-x64.nsis.7z)) { throw "App package is missing from dist/nsis-web" }
           $Installer = Get-ChildItem dist/nsis-web/Trybunx-Setup-*-x64.exe | Select-Object -First 1
-          $InstallDir = Join-Path $env:RUNNER_TEMP "Trybunx installed app"
+          # No spaces: the installer splits /D=... at whitespace.
+          $InstallDir = Join-Path $env:RUNNER_TEMP "TrybunxApp"
           $Process = Start-Process $Installer.FullName -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
-          if ($Process.ExitCode -ne 0) { throw "Installer failed" }
-          npx tsx scripts/smoke_windows_app.ts "$InstallDir/TrybunaTV AI Clip Hunter.exe"
+          if ($Process.ExitCode -ne 0) { throw "Installer failed with exit code $($Process.ExitCode)" }
+          $AppExe = Join-Path $InstallDir "TrybunaTV AI Clip Hunter.exe"
+          if (-not (Test-Path $AppExe)) {
+            Write-Host "Application not found at $AppExe"
+            Get-ChildItem $env:RUNNER_TEMP -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "temp: $($_.FullName)" }
+            Get-ChildItem "$env:LOCALAPPDATA\Programs" -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "programs: $($_.FullName)" }
+            throw "Installed application missing"
+          }
+          npx tsx scripts/smoke_windows_app.ts $AppExe
           if ($LASTEXITCODE -ne 0) { throw "Installed application failed to launch" }
       - uses: actions/upload-artifact@v4
         with:
