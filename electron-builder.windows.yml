@@ -22,9 +22,12 @@ extraResources:
     to: runtime-build.json
   - from: config
     to: config
+# NSIS cannot embed installers larger than 2 GB and the bundled CUDA runtime
+# exceeds that, so ship a small web installer. It downloads the app package,
+# or uses the .nsis.7z package placed next to the installer.
 win:
   target:
-    - target: nsis
+    - target: nsis-web
       arch: [x64]
   artifactName: Trybunx-Setup-${version}-x64.exe
 nsis:
@@ -33,3 +36,5 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Trybunx
+nsisWeb:
+  artifactName: Trybunx-Setup-${version}-x64.exe

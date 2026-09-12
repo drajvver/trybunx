@@ -56,5 +56,20 @@ Run $BundledPython @("-c", "from ocr.neural import NeuralScoreReader; NeuralScor
 Run $BundledPython @("scripts/verify_windows_bundle.py", $Stage)
 if (-not $PrepareOnly) {
     Run npm.cmd @("run", "build")
-    Run npx.cmd @("electron-builder", "--win", "--x64", "--config", "electron-builder.windows.yml", "--publish", "never")
+    # The web installer downloads this package unless it sits next to the
+    # installer; TRYBUNX_PACKAGE_URL overrides the release URL.
+    $PackageUrl = $env:TRYBUNX_PACKAGE_URL
+    if (-not $PackageUrl) {
+        $Repo = $env:GITHUB_REPOSITORY
+        if (-not $Repo) {
+            try { $Remote = (& git remote get-url origin 2>$null | Out-String).Trim() } catch { $Remote = "" }
+            if ($Remote -match 'github\.com[:/](.+?)(?:\.git)?$') { $Repo = $Matches[1] }
+        }
+        if (-not $Repo) { throw "Cannot determine the repository; set TRYBUNX_PACKAGE_URL." }
+        $Version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+        $PackageUrl = "https://github.com/$Repo/releases/latest/download/trybunx-clip-hunter-$Version-x64.nsis.7z"
+    }
+    Write-Host "App package URL: $PackageUrl"
+    Run npx.cmd @("electron-builder", "--win", "--x64", "--config", "electron-builder.windows.yml",
+        "--config.nsisWeb.appPackageUrl=$PackageUrl", "--publish", "never")
 }

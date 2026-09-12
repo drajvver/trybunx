@@ -19,6 +19,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run dist:win
+        env:
+          TRYBUNX_PACKAGE_URL: ${{ vars.TRYBUNX_PACKAGE_URL }}
       - name: Verify packaged resources
         shell: pwsh
         run: |
@@ -28,6 +30,8 @@ jobs:
       - name: Install and launch application
         shell: pwsh
         run: |
+          # The web installer uses the app package next to it instead of downloading.
+          if (-not (Get-ChildItem dist/trybunx-clip-hunter-*-x64.nsis.7z)) { throw "App package is missing from dist" }
           $Installer = Get-ChildItem dist/Trybunx-Setup-*-x64.exe | Select-Object -First 1
           $InstallDir = Join-Path $env:RUNNER_TEMP "Trybunx installed app"
           $Process = Start-Process $Installer.FullName -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
@@ -37,5 +41,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Trybunx-Windows-x64
-          path: dist/Trybunx-Setup-*-x64.exe
+          path: |
+            dist/Trybunx-Setup-*-x64.exe
+            dist/*.nsis.7z
           if-no-files-found: error
