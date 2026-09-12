@@ -26,7 +26,7 @@ Run uv @("export", "--project", "python", "--extra", "tracking", "--frozen", "--
 # CUDA 13 wheels support RTX 50-series Blackwell; CPU execution remains available.
 Run uv @("pip", "install", "--python", $BundledPython, "--target", "$Stage/python/vendor",
     "--torch-backend", $TorchBackend, "-r", "$Stage/requirements.txt")
-@{ torch_backend = $TorchBackend } | ConvertTo-Json | Set-Content "$Stage/runtime-build.json"
+@{ torch_backend = $TorchBackend } | ConvertTo-Json | Set-Content -Encoding UTF8 "$Stage/runtime-build.json"
 Run $BundledPython @("$Stage/python/track/download_model.py")
 Run $BundledPython @("$Stage/python/track/download_model.py", "--football")
 
