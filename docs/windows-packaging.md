@@ -21,14 +21,15 @@ Build on Windows x64, not macOS, because Python wheels and executables are
 platform-specific. The developer/build machine needs Node 22 and uv, plus
 internet access. Run npm ci, then npm run dist:win.
 
-The build produces dist/Trybunx-Setup-VERSION-x64.exe plus
-dist/trybunx-clip-hunter-VERSION-x64.nsis.7z. NSIS cannot embed installers
-larger than 2 GB, which the CUDA runtime exceeds, so electron-builder uses its
-nsis-web target. The installer downloads the package from TRYBUNX_PACKAGE_URL
-(defaults to this repository's latest GitHub release asset). Set that variable
-to your own hosting URL before distributing; ship both files together, or host
-the package and publish the installer alone. With no URL set at build time and
-no internet at install time, the package must sit next to the installer.
+The build produces dist/nsis-web/Trybunx-Setup-VERSION-x64.exe plus
+dist/nsis-web/trybunx-clip-hunter-VERSION-x64.nsis.7z. NSIS cannot embed
+installers larger than 2 GB, which the CUDA runtime exceeds, so
+electron-builder uses its nsis-web target. The installer downloads the package
+from TRYBUNX_PACKAGE_URL (defaults to this repository's latest GitHub release
+asset). Set that variable to your own hosting URL before distributing; ship
+both files together, or host the package and publish the installer alone. With
+no URL set at build time and no internet at install time, the package must sit
+next to the installer.
 
 Alternatively run the Windows installer workflow from GitHub Actions. It runs manually or on
 build/windows-* branches and uploads a workflow artifact; it does not publish a release.

@@ -31,8 +31,8 @@ jobs:
         shell: pwsh
         run: |
           # The web installer uses the app package next to it instead of downloading.
-          if (-not (Get-ChildItem dist/trybunx-clip-hunter-*-x64.nsis.7z)) { throw "App package is missing from dist" }
-          $Installer = Get-ChildItem dist/Trybunx-Setup-*-x64.exe | Select-Object -First 1
+          if (-not (Get-ChildItem dist/nsis-web/trybunx-clip-hunter-*-x64.nsis.7z)) { throw "App package is missing from dist/nsis-web" }
+          $Installer = Get-ChildItem dist/nsis-web/Trybunx-Setup-*-x64.exe | Select-Object -First 1
           $InstallDir = Join-Path $env:RUNNER_TEMP "Trybunx installed app"
           $Process = Start-Process $Installer.FullName -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
           if ($Process.ExitCode -ne 0) { throw "Installer failed" }
@@ -42,6 +42,6 @@ jobs:
         with:
           name: Trybunx-Windows-x64
           path: |
-            dist/Trybunx-Setup-*-x64.exe
-            dist/*.nsis.7z
+            dist/nsis-web/Trybunx-Setup-*-x64.exe
+            dist/nsis-web/*.nsis.7z
           if-no-files-found: error
