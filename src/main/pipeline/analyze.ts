@@ -299,7 +299,9 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
             `VERTICAL ${index}/${clipEvents.length} ${info.path} ` +
               `[${info.startSeconds.toFixed(2)}s -> ${info.endSeconds.toFixed(2)}s] ` +
               `tracked=${info.tracking?.tracked ?? 0}/${info.tracking?.samples ?? 0}` +
-              (info.tracking?.fallback ? ' (center fallback)' : ''),
+              (info.tracking?.wide_fallback
+                ? ' (wide framing)'
+                : info.tracking?.fallback ? ' (center fallback)' : ''),
             event.event_time
           )
           if (info.tracking?.fallback) degraded.push(`vertical_center_fallback:${event.id}`)

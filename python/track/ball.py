@@ -171,6 +171,56 @@ class BallTracker:
             predicted, image.shape, class_index, min_confidence, iou_threshold
         )
 
+    def detect_ball_tiles(
+        self,
+        image: np.ndarray,
+        min_confidence: float,
+        tile_width: int = 960,
+        tile_height: int = 540,
+        overlap: float = 0.5,
+    ) -> list[dict]:
+        """Detect small balls in overlapping native-resolution tiles.
+
+        A 10 px ball in a 1920x1080 frame becomes roughly 3 px after the
+        normal full-frame 640px letterbox, which is below the useful range of
+        COCO YOLOv8n. Tiles preserve more ball detail, and overlap prevents a
+        ball on a tile edge from being discarded. Person detection still uses
+        the one full-frame pass.
+        """
+        height, width = image.shape[:2]
+        tile_width = max(1, min(width, int(tile_width)))
+        tile_height = max(1, min(height, int(tile_height)))
+
+        def starts(length: int, size: int) -> list[int]:
+            if size >= length:
+                return [0]
+            stride = max(1, int(size * (1.0 - overlap)))
+            values = list(range(0, length - size + 1, stride))
+            last = length - size
+            if values[-1] != last:
+                values.append(last)
+            return values
+
+        detections: list[dict] = []
+        for top in starts(height, tile_height):
+            for left in starts(width, tile_width):
+                tile = image[top : top + tile_height, left : left + tile_width]
+                predicted = self.predict(tile)
+                for detection in self.detect_from(
+                    predicted, tile.shape, self.BALL_CLASS, min_confidence
+                ):
+                    detections.append({
+                        **detection,
+                        "x": detection["x"] + left,
+                        "y": detection["y"] + top,
+                        "kind": "ball",
+                    })
+        if not detections:
+            return []
+        boxes = np.array([[d["x"], d["y"], d["width"], d["height"]] for d in detections], dtype=np.float32)
+        scores = np.array([d["confidence"] for d in detections], dtype=np.float32)
+        return [detections[i] for i in self._nms(boxes, scores, 0.45)]
+
 
 def _read_exact(stream: object, byte_count: int) -> bytes:
     chunks: list[bytes] = []
@@ -263,6 +313,29 @@ def select_action_target(
     return None
 
 
+def select_continuous_ball(
+    balls: list[dict],
+    last_ball_pos: tuple[float, float] | None,
+    ball_trust: float = 0.3,
+    max_jump_px: float = 150.0,
+) -> dict | None:
+    """Return a plausible ball linked only to the prior ball.
+
+    In a wide shot the ball can be far from the player the broadcast frames,
+    so it must not be judged against the player-cluster position.
+    """
+    trusted = [ball for ball in balls if ball["confidence"] >= ball_trust]
+    if not trusted:
+        return None
+    if last_ball_pos is None:
+        return trusted[0]
+    nearby = [
+        ball for ball in trusted
+        if abs(ball["x"] - last_ball_pos[0]) + abs(ball["y"] - last_ball_pos[1]) <= max_jump_px
+    ]
+    return nearby[0] if nearby else None
+
+
 def track_ball_video(
     params: dict,
     emit_progress,
@@ -271,10 +344,9 @@ def track_ball_video(
 ) -> dict:
     """Sample full frames over [start, end) and follow the action per frame.
 
-    Detection runs once per frame; both heads come from the same forward
-    pass: the COCO `person` boxes locate the player cluster (always visible
-    on real broadcasts) while the `sports-ball` box is used opportunistically
-    when the model actually sees the ball.
+    The COCO `person` head runs once on the full frame for the fallback player
+    cluster. The `sports-ball` head runs on overlapping tiles so small balls
+    retain enough detail to be detectable; confirmed ball tracks take priority.
 
     params: input_path, ffmpeg_path, start, end, sample_fps, model_path,
       min_confidence (ball), ball_trust, person_confidence, person_iou,
@@ -359,9 +431,11 @@ def track_ball_video(
     ffmpeg_tracker[0] = process
     samples: list[dict] = []
     inference_seconds = 0.0
-    # Greedy single-target track (see select_action_target): the player
-    # cluster is the backbone; trusted continuous ball sightings override it.
+    # The player cluster is a fallback. A ball gets its own temporal
+    # confirmation track, rather than being judged against that cluster.
     last_pos: tuple[float, float] | None = None
+    last_ball_pos: tuple[float, float] | None = None
+    ball_streak = 0
     max_jump_px = max(48.0, source_width * 0.15) if source_width > 0 else 160.0
     # Per-frame link gate: allow fast action motion between consecutive
     # samples but reject teleports across the frame (verified on real
@@ -372,6 +446,7 @@ def track_ball_video(
     # compares per-frame motion, so scale the teleport gate to the sample
     # rate (a 60 px/s player at 3 fps moves ~20 px/frame).
     ball_trust = float(params.get("ball_trust", 0.3))
+    ball_confirmation_frames = max(1, int(params.get("ball_confirmation_frames", 2)))
     # Weak cluster frames (no clear main group) must not yank the crop:
     # require a minimum cluster confidence before linking to it, and resync
     # (re-seed) when the track has been lost for a while instead of
@@ -392,15 +467,11 @@ def track_ball_video(
                 )
             image = np.frombuffer(raw, dtype=np.uint8).reshape((frame_height, frame_width, 3))
             timestamp = start + index / sample_fps
-            # One forward pass per frame; ball + person heads share it.
+            # One full-frame pass finds people. Small-ball detection runs on
+            # overlapping tiles so the ball is not reduced to a few pixels.
             infer_start = time.perf_counter()
             predicted = tracker.predict(image)
-            balls = [
-                {**d, "kind": "ball"}
-                for d in tracker.detect_from(
-                    predicted, image.shape, BallTracker.BALL_CLASS, min_confidence
-                )
-            ]
+            balls = tracker.detect_ball_tiles(image, min_confidence)
             persons = [
                 {**d, "kind": "person"}
                 for d in tracker.detect_from(
@@ -415,9 +486,20 @@ def track_ball_video(
             )
             if cluster is not None and cluster["confidence"] < cluster_trust:
                 cluster = None
+            ball = select_continuous_ball(
+                balls, last_ball_pos, ball_trust=ball_trust, max_jump_px=link_gate_px,
+            )
+            if ball is not None:
+                last_ball_pos = (ball["x"], ball["y"])
+                ball_streak += 1
+            else:
+                # Never bridge an unobserved gap with an old ball position:
+                # a later false positive would otherwise look continuous.
+                last_ball_pos = None
+                ball_streak = 0
             anchor = None if lost_streak >= resync_after_lost else last_pos
-            target = select_action_target(
-                balls, cluster, anchor,
+            target = ball if ball is not None and ball_streak >= ball_confirmation_frames else select_action_target(
+                [], cluster, anchor,
                 ball_trust=ball_trust, max_jump_px=link_gate_px,
             )
             best = None

@@ -63,6 +63,19 @@ export function pythonDir(): string {
   return join(resourceRoot(), 'python')
 }
 
+/**
+ * Writable location for the automatically fetched ball model.
+ *
+ * A packaged app must not write into Contents/Resources, so production builds
+ * keep the model with the app's other local data. In development and the CLI,
+ * retain the familiar git-ignored path in the project instead.
+ */
+export function managedBallModelPath(): string {
+  const app = electronApp()
+  if (app?.isPackaged) return join(app.getPath('userData'), 'models', 'ball.onnx')
+  return join(resourceRoot(), 'python', 'track', 'models', 'ball.onnx')
+}
+
 /** The worker entry script. */
 export function workerScriptPath(): string {
   return join(pythonDir(), 'worker.py')

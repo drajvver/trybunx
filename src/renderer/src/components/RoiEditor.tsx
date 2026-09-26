@@ -75,14 +75,14 @@ export function RoiEditor({ inputPath, frameTime, roi, onRoiChange }: Props): JS
     <div className="roi-editor">
       <div className="roi-toolbar">
         <button onClick={() => void loadFrame()} disabled={!inputPath || loading}>
-          {loading ? 'Loading frame…' : 'Reload frame'}
+          {loading ? 'Wczytywanie klatki…' : 'Wczytaj klatkę ponownie'}
         </button>
         <span className="hint">
-          Draw a rectangle over the scoreboard (top-left of the frame usually)
+          Zaznacz prostokąt wokół wyniku (zwykle w lewym górnym rogu kadru)
         </span>
         {roi && (
           <button className="secondary" onClick={() => onRoiChange(null)}>
-            Clear ROI
+            Wyczyść obszar
           </button>
         )}
       </div>
@@ -117,16 +117,16 @@ export function RoiEditor({ inputPath, frameTime, roi, onRoiChange }: Props): JS
         }}
       >
         {frame ? (
-          <img src={frame.dataUrl} alt="Video frame" draggable={false} />
+          <img src={frame.dataUrl} alt="Klatka nagrania" draggable={false} />
         ) : (
-          <div className="frame-placeholder">Select a VOD to load a frame</div>
+          <div className="frame-placeholder">Wybierz nagranie VOD, aby wczytać klatkę</div>
         )}
         {rect && <div className="roi-rect" style={rect} />}
       </div>
 
       {roi && (
         <div className="roi-values">
-          ROI (normalized): x={roi.x.toFixed(3)} y={roi.y.toFixed(3)} w={roi.width.toFixed(3)} h=
+          Obszar (znormalizowany): x={roi.x.toFixed(3)} y={roi.y.toFixed(3)} szer.={roi.width.toFixed(3)} wys.=
           {roi.height.toFixed(3)}
           {frame && (
             <span>

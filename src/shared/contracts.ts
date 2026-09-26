@@ -101,6 +101,8 @@ export interface VerticalTrackingSummary {
   samples: number
   tracked: number
   fallback: boolean
+  /** Wide landscape frame preserved on a blurred vertical background. */
+  wide_fallback?: boolean
   mean_confidence?: number
 }
 

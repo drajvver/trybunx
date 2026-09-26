@@ -73,6 +73,12 @@ export interface VerticalClipConfig {
   min_confidence: number
   /** Ball must reach this confidence to override the cluster. */
   ball_trust: number
+  /** Consecutive linked ball sightings required before it controls the crop. */
+  ball_confirmation_frames: number
+  /** Crop fraction occupied by a ball near its attacking-side goal. */
+  ball_lead_fraction: number
+  /** Preserve a wide source frame when the ball cannot be tracked reliably. */
+  wide_fallback_enabled: boolean
   /** Person boxes below this are ignored by the cluster. */
   person_confidence: number
   /** NMS IoU threshold for the person pass. */
@@ -160,7 +166,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     track_sample_fps: 3,
     model_path: 'python/track/models/ball.onnx',
     min_confidence: 0.05,
-    ball_trust: 0.3,
+    ball_trust: 0.05,
+    ball_confirmation_frames: 1,
+    ball_lead_fraction: 0.25,
+    wide_fallback_enabled: true,
     person_confidence: 0.25,
     person_iou: 0.5,
     cluster_top_k: 6,
@@ -279,6 +288,12 @@ function validateConfig(cfg: AppConfig): void {
     if (v.cluster_padding < 0) throw new Error('vertical.cluster_padding must be >= 0')
     if (v.ball_trust < 0 || v.ball_trust > 1) {
       throw new Error('vertical.ball_trust must be in [0, 1]')
+    }
+    if (!Number.isInteger(v.ball_confirmation_frames) || v.ball_confirmation_frames < 1) {
+      throw new Error('vertical.ball_confirmation_frames must be an integer >= 1')
+    }
+    if (v.ball_lead_fraction < 0 || v.ball_lead_fraction > 0.5) {
+      throw new Error('vertical.ball_lead_fraction must be in [0, 0.5]')
     }
     if (v.cluster_trust < 0 || v.cluster_trust > 1) {
       throw new Error('vertical.cluster_trust must be in [0, 1]')

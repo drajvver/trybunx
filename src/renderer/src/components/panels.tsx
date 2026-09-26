@@ -16,29 +16,29 @@ export function FileSection(props: {
 }): JSX.Element {
   return (
     <section className="card">
-      <h2>1. VOD file</h2>
+      <h2>1. Plik VOD</h2>
       <div className="row">
-        <button onClick={props.onSelect}>Select video…</button>
-        <span className="file-path">{props.inputPath ?? 'No file selected'}</span>
+        <button onClick={props.onSelect}>Wybierz nagranie…</button>
+        <span className="file-path">{props.inputPath ?? 'Nie wybrano pliku'}</span>
       </div>
-      {props.probing && <div className="hint">Reading media info…</div>}
+      {props.probing && <div className="hint">Odczytywanie informacji o nagraniu…</div>}
       {props.error && <div className="error-banner">{props.error}</div>}
       {props.media && (
         <div className="meta-grid">
-          <span>Duration</span>
+          <span>Czas trwania</span>
           <span>{formatTime(props.media.durationSeconds)}</span>
-          <span>Resolution</span>
+          <span>Rozdzielczość</span>
           <span>
             {props.media.width}x{props.media.height} @ {props.media.fps.toFixed(2)} fps
           </span>
-          <span>Codecs</span>
+          <span>Kodeki</span>
           <span>
-            {props.media.videoCodec ?? '?'} / {props.media.audioCodec ?? 'no audio'}
+            {props.media.videoCodec ?? '?'} / {props.media.audioCodec ?? 'brak dźwięku'}
           </span>
         </div>
       )}
       {props.media && !props.media.hasAudio && (
-        <div className="warn-banner">No audio track: analysis will run in OCR-only mode.</div>
+        <div className="warn-banner">Brak ścieżki dźwiękowej: analiza będzie oparta wyłącznie na odczycie wyniku.</div>
       )}
     </section>
   )
@@ -53,10 +53,10 @@ export function ProgressPanel(props: {
   return (
     <section className="card">
       <div className="row">
-        <h2>4. Analysis</h2>
+        <h2>Postęp analizy</h2>
         {props.running && (
           <button className="danger" onClick={props.onCancel}>
-            Cancel
+            Anuluj
           </button>
         )}
       </div>
@@ -66,7 +66,7 @@ export function ProgressPanel(props: {
           <li key={s.name} className={`stage stage-${s.status}`}>
             <span className="stage-name">{stageLabel(s.name)}</span>
             <span className="stage-status">
-              {s.status === 'running' ? `${Math.round((s.progress ?? 0) * 100)}%` : s.status}
+              {s.status === 'running' ? `${Math.round((s.progress ?? 0) * 100)}%` : stageStatus(s.status)}
             </span>
             {s.status === 'running' && (
               <div className="bar">
@@ -86,14 +86,26 @@ export function ProgressPanel(props: {
 
 function stageLabel(name: string): string {
   const labels: Record<string, string> = {
-    prepare: 'Preparing media',
-    scoreboard_scan: 'Scanning scoreboard',
-    audio_analysis: 'Analyzing audio',
-    build_events: 'Building events',
-    generate_clips: 'Generating clips',
-    write_outputs: 'Writing outputs'
+    prepare: 'Przygotowanie nagrania',
+    scoreboard_scan: 'Odczytywanie wyniku',
+    audio_analysis: 'Analiza dźwięku',
+    build_events: 'Tworzenie zdarzeń',
+    generate_clips: 'Tworzenie klipów',
+    write_outputs: 'Zapisywanie wyników'
   }
   return labels[name] ?? name
+}
+
+function stageStatus(status: string): string {
+  const labels: Record<string, string> = {
+    pending: 'oczekuje',
+    complete: 'gotowe',
+    failed: 'błąd',
+    skipped: 'pominięto',
+    cancelled: 'anulowano',
+    cancelling: 'anulowanie'
+  }
+  return labels[status] ?? status
 }
 
 export function ResultsPanel(props: { result: AnalysisResult | null }): JSX.Element {
@@ -103,12 +115,12 @@ export function ResultsPanel(props: { result: AnalysisResult | null }): JSX.Elem
   return (
     <section className="card">
       <div className="row">
-        <h2>5. Results</h2>
+        <h2>Wyniki</h2>
         <button onClick={() => void window.clipHunter.openPath(analysis.output_dir)}>
-          Open output folder
+          Otwórz folder wyników
         </button>
         <button className="secondary" onClick={() => setOpen(!open)}>
-          {open ? 'Hide metadata' : 'Show metadata'}
+          {open ? 'Ukryj metadane' : 'Pokaż metadane'}
         </button>
       </div>
 
@@ -117,36 +129,36 @@ export function ResultsPanel(props: { result: AnalysisResult | null }): JSX.Elem
       )}
 
       {events.length === 0 ? (
-        <div className="hint">No events detected.</div>
+        <div className="hint">Nie wykryto żadnych zdarzeń.</div>
       ) : (
         <table className="events-table">
           <thead>
             <tr>
               <th>#</th>
-              <th>Type</th>
-              <th>Event time</th>
-              <th>Score</th>
-              <th>Confidence</th>
-              <th>Signals</th>
-              <th>Clip</th>
+              <th>Typ</th>
+              <th>Czas zdarzenia</th>
+              <th>Wynik</th>
+              <th>Pewność</th>
+              <th>Sygnały</th>
+              <th>Klip</th>
             </tr>
           </thead>
           <tbody>
             {events.map((e) => (
               <tr key={e.id}>
                 <td>{e.id}</td>
-                <td>{e.type}</td>
+                <td>{e.type === 'GOAL' ? 'BRAMKA' : 'CIEKAWY MOMENT'}</td>
                 <td>{formatTime(e.event_time)}</td>
                 <td>
                   {e.score_before} → {e.score_after}
                 </td>
                 <td>{(e.confidence * 100).toFixed(0)}%</td>
                 <td className="signals">
-                  {e.signals.score_change && <span className="tag">score</span>}
+                  {e.signals.score_change && <span className="tag">wynik</span>}
                   {e.signals.audio_spike && (
-                    <span className="tag">audio +{(e.signals.audio_delta_db ?? 0).toFixed(1)}dB</span>
+                    <span className="tag">dźwięk +{(e.signals.audio_delta_db ?? 0).toFixed(1)}dB</span>
                   )}
-                  {e.signals.keyword_goal && <span className="tag">keyword</span>}
+                  {e.signals.keyword_goal && <span className="tag">słowo kluczowe</span>}
                 </td>
                 <td>
                   {e.clip ? (

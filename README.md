@@ -1,172 +1,65 @@
-# TrybunaTV AI Clip Hunter (v0.1)
+# TrybunaTV AI Clip Hunter
 
-Automatic highlight extraction from completed football broadcast VOD files.
-The app analyzes a local recording, detects goals from scoreboard OCR +
-audio excitement, and cuts one clip per goal. See `prd.md` for the full
-product requirements.
+TrybunaTV AI Clip Hunter pomaga szybko znaleźć bramki i najciekawsze momenty
+w gotowym nagraniu meczu piłkarskiego. Wybierasz nagranie, zaznaczasz wynik na
+ekranie, a aplikacja tworzy gotowe klipy.
 
-## Architecture
+Nie musisz znać się na montażu ani ustawieniach technicznych.
 
-```text
-Electron / TypeScript  (product shell, orchestration, domain logic)
-    |
-    +-- FFmpeg / ffprobe      media probing, frame & audio extraction, clips
-    +-- detection core        score state machine, audio events, aggregation
-    +-- optional Python worker (isolated child process, JSON Lines over stdio)
-            +-- scoreboard OCR (RapidOCR/ONNX; Tesseract fallback)
-```
+## Jak używać aplikacji
 
-- `src/main/` — Electron main process: pipeline, detection, clips, IPC
-- `src/renderer/` — UI (React)
-- `src/shared/` — language-neutral data contracts and configuration
-- `python/` — OCR worker (`worker.py`); never the application shell
-- `config/default.yaml` — all detection thresholds and timing parameters
+1. Otwórz aplikację i wybierz nagranie meczu.
+2. W sekcji **Obszar wyniku** ustaw czas, w którym wynik jest widoczny, a potem
+   zaznacz go prostokątem na klatce nagrania.
+3. Wybierz **Rozpocznij analizę** i poczekaj na zakończenie.
+4. W sekcji **Wyniki** zobaczysz znalezione bramki oraz interesujące momenty.
+   Kliknij nazwę klipu, aby odnaleźć go w folderze.
 
-## Setup
+To wszystko. Zaznaczony obszar wyniku zostanie zapamiętany na przyszłość.
 
-Requirements: Node 20+, [uv](https://docs.astral.sh/uv/) (manages the Python
-side and auto-installs the pinned Python 3.12 if missing), and ffmpeg
-(xvfb for headless UI tests). Tesseract is optional and used only by the
-legacy OCR mode or opt-in fallback.
+## Co otrzymasz
 
-```bash
-npm install
-npm run python:setup     # uv sync -> python/.venv
-```
+Po zakończeniu analizy aplikacja tworzy folder z wynikami. Znajdziesz w nim:
 
-Python deps live in `python/pyproject.toml` (Python >= 3.10, pinned to 3.12
-via `python/.python-version`; uv will use an already-installed interpreter
-or download one). Install ffmpeg with:
-- Ubuntu/Debian: `sudo apt install ffmpeg`
-- macOS: `brew install ffmpeg`
+- klipy bramek w oryginalnym poziomym formacie;
+- pionowe klipy 9:16, gotowe do publikacji w mediach społecznościowych;
+- listę wykrytych zdarzeń;
+- folder z pełnymi wynikami analizy.
 
-For legacy OCR, also install `tesseract-ocr` (Linux) or `tesseract` (Homebrew).
-- Windows: install both and set `TRYBUNX_FFMPEG_PATH` / `TESSERACT_CMD`
+Przy pierwszym tworzeniu pionowego klipu aplikacja pobierze niewielki model do
+śledzenia piłki. Wymaga to jednorazowo połączenia z internetem; później model
+jest używany z dysku.
 
-### macOS notes
+Pionowy klip podąża za piłką, gdy jest ona dobrze widoczna. Jeżeli kamera
+pokazuje szeroki fragment boiska, a piłka nie jest pewnie wykryta, aplikacja
+zachowuje całe ujęcie na rozmytym tle zamiast wycinać bramkę z kadru.
 
-The app works on Apple Silicon and Intel Macs. Homebrew-installed binaries
-are found even when the app is launched from Finder (the app probes
-`/opt/homebrew/bin` and `/usr/local/bin`; you can also set
-`TRYBUNX_FFMPEG_PATH` / `TESSERACT_CMD` / `TRYBUNX_PYTHON`).
+## Interesujące momenty
 
-Build a distributable dmg (bundles the Python worker + deps, so end users
-only need ffmpeg, which a future release will bundle too):
+Domyślnie aplikacja tworzy klipy dla potwierdzonych bramek. Potrafi też
+znaleźć głośne, emocjonujące fragmenty na podstawie reakcji trybun i
+komentarza.
 
-```bash
-npm run python:setup:portable   # fills python/vendor (relocatable, no venv)
-npm run dist:mac                # dist/*.dmg (arm64 + x64, unsigned)
-```
+Jeżeli chcesz tworzyć klipy także dla takich momentów, otwórz
+**Opcjonalne ustawienia** i zaznacz **Twórz klipy dla interesujących momentów
+wykrytych wyłącznie przez dźwięk**.
 
-The dmg is unsigned — on first launch right-click the app → Open, or run
-`xattr -cr "TrybunaTV AI Clip Hunter.app"`. See `JOURNAL.md` for details and
-current limitations.
+## Gdy wynik nie jest wykrywany
 
-## Running
+- Zaznacz możliwie mały prostokąt obejmujący tylko wynik, bez logo stacji i
+  zegara.
+- Wybierz moment, w którym wynik nie jest zasłonięty przez grafikę lub
+  powtórkę.
+- Jeżeli nagranie nie ma dźwięku, aplikacja nadal może wykryć bramki po zmianie
+  wyniku, ale nie znajdzie momentów opartych wyłącznie na emocjach dźwiękowych.
 
-Desktop app (dev):
+## Ustawienia
 
-```bash
-npm run dev
-```
+Większość osób nie musi ich zmieniać. Sekcja **Opcjonalne ustawienia** pozwala
+między innymi dostosować czułość dźwięku, długość klipów i sposób kadrowania
+pionowego nagrania. Zmiany są zapisywane lokalnie na komputerze.
 
-Headless analysis (same core as the app):
+## Pomoc techniczna
 
-```bash
-npm run analyze -- --input match.mp4 --roi "0.04,0.03,0.18,0.08"
-```
-
-The ROI is the scoreboard region in normalized coordinates
-(`x,y,width,height`, each 0..1). In the desktop UI you draw it on a frame
-instead (section 2 of the UI).
-
-Outputs land in `output/<video>_<timestamp>/`:
-
-```text
-events.json      detected events with signals, confidence and clip info
-analysis.json    run metadata (counts, durations, config snapshot)
-clips/           goal_01_67m14s.mp4 + goal_01_67m14s_vertical.mp4 ...
-logs/analysis.log  per-sample detection log for tuning
-```
-
-Every goal produces two clips of the same window with identical audio: the
-horizontal original and an action-following 9:16 vertical twin
-(`*_vertical.mp4`, 1080x1920, flat in `clips/`). The vertical crop keeps full
-source height and pans horizontally after the action: the Python worker runs
-one YOLOv8n ONNX pass per sampled frame (~3 samples/s) and follows the
-tallest close-up player (COCO `person`, the close-up the broadcast is
-showing), switching to the ball (COCO `sports-ball`) only when it is seen
-confidently and continuously. Trajectory is smoothed with hold-last +
-ease-to-center when the action is lost. Fetch the model once with:
-
-```bash
-python/track/download_model.py   # ~13 MB, git-ignored
-```
-
-If the model is missing, vertical clips degrade to a static center crop and
-the run records `vertical_center_fallback:<event>` instead of failing.
-
-## Tuning
-
-Everything the detection depends on lives in `config/default.yaml`:
-OCR intervals and confirmation rules, audio spike thresholds, lookback
-windows, confidence weights, clip pre/post-roll, dedup window, encoding.
-Changes apply on the next run without touching code.
-
-Neural OCR is the default. On Apple Silicon, `ocr.provider: auto` uses the
-ONNX Runtime CoreML provider and falls back to neural CPU inference if CoreML
-cannot compile the model. Set `ocr.provider: cpu` when comparing performance,
-or `ocr.engine: tesseract` to diagnose a regression against the legacy engine.
-`ocr.fallback_to_tesseract` is disabled by default because neural misses are
-handled by temporal confirmation and invoking the legacy engine is relatively
-expensive.
-
-The worker streams cropped frames directly from FFmpeg, avoiding temporary PNG
-files. A lightweight visual-change detector runs neural OCR only when the
-scoreboard changes (plus periodic refreshes), while still taking independent
-confirmation reads after every change. Tune this with
-`ocr.change_threshold`, `ocr.refresh_interval_seconds`, or disable it with
-`ocr.change_detection_enabled: false` when diagnosing unusual animated layouts.
-
-`analysis.decode_acceleration: auto` performs a short real-world decode probe on
-macOS and uses VideoToolbox only when it beats software decoding by a meaningful
-margin. Hardware initialization or decode errors transparently retry in
-software. Use `videotoolbox` to force a hardware attempt or `software` to skip
-the probe. `analysis.json` records `video_decoder` and whether fallback occurred.
-
-## Tests
-
-```bash
-npm test        # unit tests + synthetic-VOD end-to-end test (~2 min)
-npm run test:ui # Electron UI smoke test (headless, uses xvfb if needed)
-```
-
-The e2e test generates a synthetic broadcast (scoreboard graphic + crowd
-audio + a sweeping trackable ball) with known goal times and verifies the
-full pipeline: baseline handling, anomaly rejection, transitions, timestamps,
-dedup, horizontal clips and 1080x1920 vertical twins.
-
-## Benchmark (PRD Milestone 5)
-
-For historical broadcast evaluation, put videos plus manually annotated
-`<name>.truth.json` files (ground truth goals + optional per-video ROI)
-into a directory, then:
-
-```bash
-npm run benchmark -- --dir dataset --roi "0.04,0.03,0.18,0.08"
-```
-
-It reports goal recall, precision, duplicate rate, median timestamp error,
-clip coverage and vertical-twin coverage against the PRD section 34 targets
-(vertical twins have no PRD target yet; the benchmark reports the share of
-correctly detected goals whose 1080x1920 twin matches the horizontal window).
-
-## v0.1 scope notes
-
-- Goal detection needs only the scoreboard + audio; speech-to-text is
-  intentionally absent (optional v0.2 component) and its absence never
-  blocks detection.
-- Clip cutting re-encodes by default for frame-accurate boundaries
-  (`clips.encoding: copy` switches to stream copy).
-- Python worker failures degrade gracefully: audio failures continue
-  OCR-only; OCR failure fails the stage and can be retried.
+Instrukcje dla osób rozwijających projekt, wymagania instalacyjne, testy i opis
+techniczny są w [docs/technical](docs/technical/README.md).

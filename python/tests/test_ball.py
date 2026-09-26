@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from track.ball import BallTracker, cluster_persons, select_action_target
+from track.ball import BallTracker, cluster_persons, select_action_target, select_continuous_ball
 
 
 def _tracker() -> BallTracker:
@@ -154,6 +154,23 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(persons[0]["kind"], "person")
         self.assertAlmostEqual(persons[0]["x"], 640.0, delta=2.0)
 
+    def test_ball_tiles_preserve_coordinates_from_each_tile(self) -> None:
+        """Tile-local detections must map back into the full source frame."""
+        tracker = _tracker()
+        tracker.predict = lambda _image: None  # type: ignore[method-assign]
+        tracker.detect_from = lambda _predicted, _shape, _class, _threshold: [  # type: ignore[method-assign]
+            {"x": 320.0, "y": 180.0, "width": 16.0, "height": 16.0, "confidence": 0.8}
+        ]
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        balls = tracker.detect_ball_tiles(
+            image, 0.3, tile_width=640, tile_height=360, overlap=0.0
+        )
+        self.assertEqual(len(balls), 4)
+        self.assertEqual(
+            {(ball["x"], ball["y"]) for ball in balls},
+            {(320.0, 180.0), (960.0, 180.0), (320.0, 540.0), (960.0, 540.0)},
+        )
+
 
 class ClusterTests(unittest.TestCase):
     def test_tallest_box_wins_over_confidence(self) -> None:
@@ -217,6 +234,21 @@ class SelectActionTargetTests(unittest.TestCase):
         self.assertIsNone(
             select_action_target([], None, (1200.0, 600.0),
                                  ball_trust=0.3, max_jump_px=150.0)
+        )
+
+    def test_ball_links_to_prior_ball_not_distant_player_cluster(self) -> None:
+        # The ball may be far from the featured player in a wide shot.
+        ball = select_continuous_ball(
+            [self._ball(200.0, 0.8)], (150.0, 700.0), ball_trust=0.3, max_jump_px=150.0,
+        )
+        assert ball is not None
+        self.assertAlmostEqual(ball["x"], 200.0)
+
+    def test_ball_rejects_a_teleport_from_its_own_history(self) -> None:
+        self.assertIsNone(
+            select_continuous_ball(
+                [self._ball(1000.0, 0.9)], (100.0, 700.0), ball_trust=0.3, max_jump_px=150.0,
+            )
         )
 
 

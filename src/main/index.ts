@@ -83,12 +83,12 @@ export function registerAppIpc(win: BrowserWindow): void {
   ipcMain.handle('dialog:selectVideo', async () => {
     const settings = loadSettings()
     const result = await dialog.showOpenDialog(win, {
-      title: 'Select a VOD recording',
+      title: 'Wybierz nagranie VOD',
       properties: ['openFile'],
       defaultPath: settings.lastInputDir,
       filters: [
-        { name: 'Video files', extensions: ['mp4', 'mkv', 'mov', 'avi', 'ts', 'webm'] },
-        { name: 'All files', extensions: ['*'] }
+        { name: 'Pliki wideo', extensions: ['mp4', 'mkv', 'mov', 'avi', 'ts', 'webm'] },
+        { name: 'Wszystkie pliki', extensions: ['*'] }
       ]
     })
     if (result.canceled || result.filePaths.length === 0) return null

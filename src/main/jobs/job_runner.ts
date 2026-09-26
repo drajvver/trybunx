@@ -54,7 +54,7 @@ export class JobManager {
 
   start(inputPath: string, roi: Roi, configOverrides?: Record<string, unknown>): AnalysisJob {
     if (this.active && (this.active.job.status === 'running' || this.active.job.status === 'queued')) {
-      throw new Error('An analysis job is already running. Cancel it first.')
+      throw new Error('Analiza jest już uruchomiona. Najpierw ją anuluj.')
     }
 
     const settings = loadSettings()

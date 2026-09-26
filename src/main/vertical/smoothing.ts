@@ -43,8 +43,18 @@ export function computeTrajectory(
     return { xs: new Array(frames).fill(Math.round(center)), fps: outputFps, cropWidth, cropHeight, fallback: true }
   }
 
-  // Raw target center per output frame: nearest tracked sample, but only if
+  // Raw target per output frame: nearest tracked sample, but only if
   // it is close in time; otherwise this frame counts as lost (hold/recenter).
+  // Balls near either touchline are deliberately off-centre: this keeps more
+  // room toward the nearby goal instead of cutting it out at the decisive
+  // moment. Player-cluster fallback samples remain conventionally centred.
+  const cropXFor = (sample: BallSample): number => {
+    if (sample.kind !== 'ball') return clamp(sample.x - cropWidth / 2, 0, maxX)
+    const fraction = sample.x >= sourceWidth / 2
+      ? cfg.ball_lead_fraction
+      : 1 - cfg.ball_lead_fraction
+    return clamp(sample.x - cropWidth * fraction, 0, maxX)
+  }
   const maxSampleGap = 1 / Math.max(0.5, cfg.sample_fps) / 2 + 0.05
   const raw: Array<number | null> = []
   for (let f = 0; f < frames; f++) {
@@ -58,7 +68,7 @@ export function computeTrajectory(
         best = s
       }
     }
-    raw.push(best && bestDt <= Math.max(0.6, maxSampleGap * 4) ? clamp(best.x - cropWidth / 2, 0, maxX) : null)
+    raw.push(best && bestDt <= Math.max(0.6, maxSampleGap * 4) ? cropXFor(best) : null)
   }
 
   // Hold last position after losing the ball, then ease to center.

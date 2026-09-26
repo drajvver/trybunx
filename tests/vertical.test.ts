@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { computeTrajectory, cropWidthFor } from '../src/main/vertical/smoothing'
+import { shouldUseWideFallback } from '../src/main/vertical/renderer'
 import { buildSendcmd, staticCropFilter } from '../src/main/vertical/crop_command'
 import { verticalClipFileName } from '../src/main/clips/generator'
 import { DEFAULT_CONFIG } from '../src/shared/config'
@@ -74,11 +75,23 @@ describe('computeTrajectory', () => {
       expect(Math.abs(traj.xs[i] - traj.xs[i - 1])).toBeLessThanOrEqual(maxStep)
     }
   })
+
+  it('leaves goal-side room when following a ball near the right half', () => {
+    const ballAtRight = [sample(0, 900), sample(1, 900)]
+    const clusterAtRight = ballAtRight.map((s) => ({ ...s, kind: 'cluster' as const }))
+    const cfg = { ...CFG, smoothing_window_seconds: 0, ball_lead_fraction: 0.25 }
+    const ballTrajectory = computeTrajectory(ballAtRight, 0, 1, W, H, 10, cfg)
+    const clusterTrajectory = computeTrajectory(clusterAtRight, 0, 1, W, H, 10, cfg)
+    // Ball framing positions the ball one-quarter into the crop, giving the
+    // three-quarters on its goal side rather than centering it.
+    expect(ballTrajectory.xs[5]).toBeGreaterThan(clusterTrajectory.xs[5] + 100)
+  })
 })
 
 describe('buildSendcmd', () => {
   it('emits valid sendcmd lines within the clip duration', () => {
-    const traj = computeTrajectory([sample(0, 640), sample(4, 640)], 0, 5, W, H, 25, CFG)
+    const staticCluster = [sample(0, 640), sample(4, 640)].map((s) => ({ ...s, kind: 'cluster' as const }))
+    const traj = computeTrajectory(staticCluster, 0, 5, W, H, 25, CFG)
     const cmd = buildSendcmd(traj, 5)
     const lines = cmd.trim().split('\n')
     expect(lines.length).toBeGreaterThan(3)
@@ -88,12 +101,29 @@ describe('buildSendcmd', () => {
       expect(t).toBeLessThanOrEqual(5)
     }
     const xs = lines.map((l) => parseInt(l.split('crop x ')[1], 10))
-    expect(new Set(xs).size).toBe(1) // static ball -> one x value
+    expect(new Set(xs).size).toBe(1) // static cluster -> one x value
   })
 })
 
 describe('staticCropFilter', () => {
   it('covers the full height', () => {
     expect(staticCropFilter(1280, 720)).toBe('crop=405:720')
+  })
+})
+
+describe('wide fallback', () => {
+  it('preserves a wide shot when the ball is not reliably tracked', () => {
+    expect(shouldUseWideFallback([
+      { ...sample(0, 120), kind: 'cluster' as const, width: 1300 },
+      { ...sample(1, 160), kind: 'cluster' as const, width: 1250 },
+      { ...sample(2, 200), kind: 'cluster' as const, width: 1200 }
+    ], 1920)).toBe(true)
+  })
+
+  it('keeps the tracked crop when ball sightings are sustained', () => {
+    expect(shouldUseWideFallback([
+      ...Array.from({ length: 8 }, (_, i) => ({ ...sample(i, 1500), kind: 'ball' as const })),
+      { ...sample(9, 1500), kind: 'cluster' as const, width: 1400 }
+    ], 1920)).toBe(false)
   })
 })

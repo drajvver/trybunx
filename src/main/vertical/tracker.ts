@@ -2,7 +2,10 @@ import { existsSync } from 'fs'
 import { isAbsolute, resolve } from 'path'
 import { PythonWorker } from '../workers/python_worker'
 import { resolveBinary } from '../media/process'
+import { managedBallModelPath, resourceRoot } from '../paths'
 import { AppConfig, clamp } from '../../shared/config'
+
+const STOCK_MODEL_CONFIG_PATH = 'python/track/models/ball.onnx'
 
 /** One action position sample. Coordinates are source-video pixels. */
 export interface BallSample {
@@ -66,13 +69,21 @@ export interface TrackBallOptions {
 export async function trackBall(opts: TrackBallOptions): Promise<BallTrack> {
   opts.signal?.throwIfAborted()
   const modelPath = opts.cfg.vertical.model_path
-  const resolvedModel = isAbsolute(modelPath) || existsSync(modelPath)
-    ? modelPath
-    : resolve(process.cwd(), modelPath)
+  const usesStockModel = modelPath === STOCK_MODEL_CONFIG_PATH
+  const resolvedModel = usesStockModel
+    ? managedBallModelPath()
+    : isAbsolute(modelPath) || existsSync(modelPath)
+      ? modelPath
+      : resolve(resourceRoot(), modelPath)
+  if (!existsSync(resolvedModel)) {
+    if (usesStockModel) {
+      await opts.worker.request('ensure_ball_model', { model_path: resolvedModel }, { timeoutMs: 10 * 60 * 1000 })
+    }
+  }
   if (!existsSync(resolvedModel)) {
     throw new Error(
       `Ball model not found at ${modelPath} (resolved ${resolvedModel}). ` +
-        'Run: python/track/download_model.py'
+        'Check your Internet connection or choose a local model in the configuration.'
     )
   }
   const result = await opts.worker.request<WorkerTrackResult>(
@@ -86,6 +97,7 @@ export async function trackBall(opts: TrackBallOptions): Promise<BallTrack> {
       model_path: resolvedModel,
       min_confidence: opts.cfg.vertical.min_confidence,
       ball_trust: opts.cfg.vertical.ball_trust,
+      ball_confirmation_frames: opts.cfg.vertical.ball_confirmation_frames,
       person_confidence: opts.cfg.vertical.person_confidence,
       person_iou: opts.cfg.vertical.person_iou,
       cluster_top_k: opts.cfg.vertical.cluster_top_k,

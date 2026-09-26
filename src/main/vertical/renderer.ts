@@ -31,6 +31,38 @@ export interface VerticalRenderResult {
   fallback: boolean
 }
 
+/**
+ * A person cluster that spans most of a wide pitch is not a useful crop
+ * anchor: it tends to select a foreground player while the decisive action
+ * (and goal) sits on the opposite side. If there is no sustained ball track,
+ * preserve the whole source frame instead of making a confidently bad crop.
+ */
+export function shouldUseWideFallback(
+  samples: Array<{ lost: boolean; kind?: 'ball' | 'cluster'; width: number }>,
+  sourceWidth: number
+): boolean {
+  const tracked = samples.filter((sample) => !sample.lost)
+  if (tracked.length === 0) return false
+  const balls = tracked.filter((sample) => sample.kind === 'ball').length
+  const clusters = tracked
+    .filter((sample) => sample.kind === 'cluster' && sample.width > 0)
+    .map((sample) => sample.width)
+    .sort((a, b) => a - b)
+  if (clusters.length === 0) return false
+  const medianWidth = clusters[Math.floor(clusters.length / 2)]
+  const minimumReliableBalls = Math.max(2, Math.ceil(tracked.length * 0.1))
+  return balls < minimumReliableBalls && medianWidth >= sourceWidth * 0.5
+}
+
+function wideFrameFilter(width: number, height: number): string {
+  return [
+    '[0:v]split=2[background][foreground]',
+    `[background]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=20:10[blurred]`,
+    `[foreground]scale=${width}:${height}:force_original_aspect_ratio=decrease[fit]`,
+    '[blurred][fit]overlay=(W-w)/2:(H-h)/2'
+  ].join(';')
+}
+
 function verticalFileName(horizontalPath: string): string {
   return horizontalPath.replace(/\.mp4$/i, '_vertical.mp4')
 }
@@ -49,6 +81,7 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
   const duration = opts.window.end - opts.window.start
 
   let xs: number[] | null = null
+  let useWideFallback = false
   let tracking: VerticalTrackingSummary = {
     samples: 0,
     tracked: 0,
@@ -78,17 +111,22 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
           : 0
       }
       if (tracked.length > 0) {
-        const traj = computeTrajectory(
-          track.samples,
-          opts.window.start,
-          opts.window.end,
-          opts.sourceWidth,
-          opts.sourceHeight,
-          Math.max(1, Math.round(opts.sourceFps)) || 25,
-          v
-        )
-        xs = traj.xs
-        tracking.fallback = traj.fallback
+        useWideFallback = v.wide_fallback_enabled && shouldUseWideFallback(track.samples, opts.sourceWidth)
+        if (useWideFallback) {
+          tracking.wide_fallback = true
+        } else {
+          const traj = computeTrajectory(
+            track.samples,
+            opts.window.start,
+            opts.window.end,
+            opts.sourceWidth,
+            opts.sourceHeight,
+            Math.max(1, Math.round(opts.sourceFps)) || 25,
+            v
+          )
+          xs = traj.xs
+          tracking.fallback = traj.fallback
+        }
       }
     } catch (err) {
       if ((err as Error).message === 'cancelled' || opts.signal?.aborted) throw err
@@ -100,7 +138,9 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
   const cropW = Math.max(2, Math.min(opts.sourceWidth, Math.floor((opts.sourceHeight * 9) / 16)))
   let videoFilter: string
   let cmdPath: string | null = null
-  if (xs && !tracking.fallback) {
+  if (useWideFallback) {
+    videoFilter = wideFrameFilter(v.width, v.height)
+  } else if (xs && !tracking.fallback) {
     const fps = Math.max(1, Math.round(opts.sourceFps)) || 25
     cmdPath = `${opts.tempDir}/vertical_${Date.now()}_${Math.floor(Math.random() * 1e6)}.cmd`
     await writeFile(cmdPath, buildSendcmd({ xs, fps, cropWidth: cropW, cropHeight: opts.sourceHeight, fallback: false }))

@@ -15,4 +15,5 @@ python/vendor/
 python/.requirements.lock
 # Ball model (~13 MB) is fetched via python/track/download_model.py.
 python/track/models/*.onnx
+python/track/models/*.pt
 !python/track/models/.gitkeep

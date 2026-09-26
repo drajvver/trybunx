@@ -20,6 +20,7 @@ import subprocess
 import sys
 import traceback
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -29,6 +30,7 @@ from ocr.change_detection import FrameChangeDetector
 from ocr.engine import read_score
 from ocr.neural import NeuralScoreReader
 from track.ball import BallModelError, track_ball_video
+from track.download_model import ensure_model
 
 
 def find_tesseract() -> str:
@@ -74,6 +76,13 @@ def op_ping(params: dict) -> dict:
         "onnx_providers": onnx_providers,
         "python_version": sys.version.split()[0],
     }
+
+
+def op_ensure_ball_model(params: dict) -> dict:
+    """Fetch the stock ONNX model into the app's writable model location."""
+    model_path = Path(str(params["model_path"])).expanduser()
+    ready_path = ensure_model(model_path)
+    return {"model_path": str(ready_path), "size": ready_path.stat().st_size}
 
 
 neural_readers: dict[str, NeuralScoreReader] = {}
@@ -450,6 +459,7 @@ def op_ocr_batch(params: dict) -> dict:
 
 OPS = {
     "ping": op_ping,
+    "ensure_ball_model": op_ensure_ball_model,
     "ocr_batch": op_ocr_batch,
     "ocr_video": op_ocr_video,
     "track_ball_video": lambda params: track_ball_video(

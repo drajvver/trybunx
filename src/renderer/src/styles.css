@@ -213,6 +213,100 @@ input:focus {
   margin-top: 10px;
 }
 
+.settings-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.optional-settings {
+  margin: 4px 0 14px;
+}
+
+.optional-settings > summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.optional-settings > .hint {
+  margin: 10px 0 0;
+  max-width: 70ch;
+}
+
+.settings-actions {
+  margin-top: 14px;
+}
+
+.settings-editor fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0;
+  padding: 12px;
+}
+
+.settings-editor legend {
+  color: var(--text);
+  font-size: 13px;
+  padding: 0 5px;
+}
+
+.toggle-setting {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.toggle-setting input {
+  accent-color: var(--accent);
+}
+
+.settings-fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.setting-field {
+  color: var(--text);
+  display: grid;
+  font-size: 13px;
+  gap: 5px;
+}
+
+.setting-field input {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 7px 8px;
+  width: 100%;
+}
+
+.setting-field input:disabled {
+  opacity: 0.5;
+}
+
+.setting-field small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.settings-editor details {
+  color: var(--muted);
+}
+
+.settings-editor summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.advanced-fields {
+  margin-top: 12px;
+}
+
 .stages {
   list-style: none;
   margin: 0;

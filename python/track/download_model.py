@@ -28,26 +28,35 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def ensure_model(model_path: Path = MODEL_PATH, force: bool = False) -> Path:
+    """Fetch a verified copy of the tracker model when it is not present."""
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    if model_path.exists() and not force:
+        print(f"model already present: {model_path} ({model_path.stat().st_size} bytes)")
+        return model_path
+    print(f"downloading {MODEL_URL} ...")
+    tmp = model_path.with_suffix(model_path.suffix + ".download")
+    try:
+        urllib.request.urlretrieve(MODEL_URL, tmp)
+        size = tmp.stat().st_size
+        print(f"downloaded {size} bytes")
+        if size != EXPECTED_SIZE:
+            raise RuntimeError(f"expected {EXPECTED_SIZE} bytes, got {size}")
+        digest = sha256_of(tmp)
+        if digest != EXPECTED_SHA256:
+            raise RuntimeError(f"sha256 mismatch: {digest}")
+        print(f"sha256 OK: {digest}")
+        tmp.replace(model_path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    print(f"model ready: {model_path}")
+    return model_path
+
+
 def main() -> int:
     force = "--force" in sys.argv[1:]
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if MODEL_PATH.exists() and not force:
-        print(f"model already present: {MODEL_PATH} ({MODEL_PATH.stat().st_size} bytes)")
-        return 0
-    print(f"downloading {MODEL_URL} ...")
-    tmp = MODEL_PATH.with_suffix(".onnx.download")
-    urllib.request.urlretrieve(MODEL_URL, tmp)
-    size = tmp.stat().st_size
-    print(f"downloaded {size} bytes")
-    if size != EXPECTED_SIZE:
-        print(f"WARNING: expected {EXPECTED_SIZE} bytes, got {size}", file=sys.stderr)
-    digest = sha256_of(tmp)
-    if digest != EXPECTED_SHA256:
-        print(f"WARNING: sha256 mismatch: {digest}", file=sys.stderr)
-    else:
-        print(f"sha256 OK: {digest}")
-    tmp.replace(MODEL_PATH)
-    print(f"model ready: {MODEL_PATH}")
+    ensure_model(force=force)
     return 0
 
 

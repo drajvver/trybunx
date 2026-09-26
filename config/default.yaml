@@ -59,8 +59,8 @@ clips:
 # layout). The crop follows the main player cluster (COCO person, always
 # visible on real broadcasts); the ball (COCO sports-ball) is used
 # opportunistically when the model actually sees it.
-# model_path is resolved relative to the project root; the model is fetched
-# with `python/track/download_model.py` (git-ignored, ~13 MB).
+# The standard model downloads automatically during the first vertical clip
+# (git-ignored, ~13 MB). A custom path is resolved relative to the app folder.
 vertical:
   enabled: true
   width: 1080
@@ -68,7 +68,10 @@ vertical:
   track_sample_fps: 6            # action position samples per second
   model_path: python/track/models/ball.onnx
   min_confidence: 0.05           # ball sightings below this are ignored (cluster still applies)
-  ball_trust: 0.20               # ball must reach this to override the cluster
+  ball_trust: 0.05               # low-confidence small-ball detections can still lead the crop
+  ball_confirmation_frames: 1    # a short ball sighting still matters at the goal moment
+  ball_lead_fraction: 0.25       # keep 75% of the crop toward the nearby goal
+  wide_fallback_enabled: true    # preserve the full pitch when no reliable ball track exists
   person_confidence: 0.25        # person boxes below this are ignored by the cluster
   person_iou: 0.5                # NMS IoU threshold for the person pass
   cluster_top_k: 6               # tallest of the top-k person boxes is the action
