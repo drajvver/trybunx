@@ -7,6 +7,7 @@ this module never cuts clips itself (application boundary: PRD section 9).
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 
@@ -395,6 +396,7 @@ def track_ball_video(
          "-ss", f"{start:.3f}", "-t", "0.5", "-i", input_path,
          "-vf", scale_filter,
          "-frames:v", "1", "-f", "null", "-"],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     if probe.returncode != 0:
@@ -406,6 +408,7 @@ def track_ball_video(
          "-ss", f"{start:.3f}", "-i", input_path,
          "-vf", scale_filter,
          "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     raw_probe = probe_size.stdout or b""
@@ -426,7 +429,7 @@ def track_ball_video(
     scale_x = (source_width / frame_width) if source_width > 0 else 1.0
     scale_y = (source_height / frame_height) if source_height > 0 else 1.0
 
-    process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(args, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     active_ffmpeg[0] = process
     ffmpeg_tracker[0] = process
     samples: list[dict] = []

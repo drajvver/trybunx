@@ -209,7 +209,7 @@ def _decode_probe(
     started = time.perf_counter()
     process: subprocess.Popen | None = None
     try:
-        process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        process = subprocess.Popen(args, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         active_ffmpeg[0] = process
         process.communicate(timeout=60)
         return process.returncode == 0, time.perf_counter() - started
@@ -296,7 +296,7 @@ def op_ocr_video(params: dict) -> dict:
         cached: dict | None = None
         inferred = 0
         reused = 0
-        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(args, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         active_ffmpeg[0] = process
         try:
             assert process.stdout is not None
