@@ -1,6 +1,7 @@
 # Developer/CI build entry point. End users only run the resulting installer.
 param([switch]$PrepareOnly)
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 # Windows PowerShell started through an intermediate process (pwsh -> npm/cmd
 # -> powershell) inherits PowerShell 7's module paths, which makes module
 # auto-loading resolve incompatible 7.0.0.0 modules and break cmdlets such as

@@ -38,7 +38,7 @@ async function main(): Promise<void> {
         }
       })
       window.clipHunter.startJob({ inputPath: path, roi: { x: 0.005, y: 0.01, width: 0.18, height: 0.13 }, configOverrides: {
-        clips: { pre_goal_seconds: 4, post_goal_seconds: 2, max_clip_seconds: 10 },
+        clips: { goal_pre_roll_seconds: 4, goal_post_roll_seconds: 2, max_clip_seconds: 10 },
         vertical: { width: 360, height: 640, video_preset: 'ultrafast' }
       } }).catch(reject)
     }), video)
