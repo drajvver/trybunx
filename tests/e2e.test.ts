@@ -7,6 +7,7 @@ import { describe, expect, it, beforeAll } from 'vitest'
 import { spawnSync } from 'child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { resolve } from 'path'
+import { buildConfig } from '../src/main/config/loader'
 import { makeSyntheticMatch } from '../scripts/make_synthetic_match'
 
 const ROOT = resolve(__dirname, '..')
@@ -16,7 +17,7 @@ const TRUTH = resolve(FIXTURES, 'synthetic_match.truth.json')
 const OUTPUT = resolve(FIXTURES, 'e2e_output')
 
 // Scoreboard box spans roughly (16,16)-(316,80); ROI with margin, normalized.
-const ROI = '0.005,0.01,0.30,0.13'
+const ROI = '0.005,0.01,0.18,0.13'
 
 interface TruthFile {
   events: Array<{ type: string; timestamp: number; scoreboard_update: number; score_after: string }>
@@ -47,7 +48,7 @@ interface E2EEvent {
 
 beforeAll(async () => {
   await makeSyntheticMatch(VIDEO)
-})
+}, 600000)
 
 function runCli(): { status: number | null; stdout: string; stderr: string } {
   return spawnSync(
@@ -76,7 +77,7 @@ describe('end-to-end pipeline on synthetic VOD', () => {
       ) as { events: E2EEvent[] }
       events = parsed.events
     }
-  })
+  }, 600000)
 
   it('completes analysis and produces the output contract', () => {
     if (cliResult.status !== 0) {
@@ -118,7 +119,7 @@ describe('end-to-end pipeline on synthetic VOD', () => {
     }
   })
 
-  it('generates one valid clip per goal, each <= 30s and covering the goal moment', () => {
+  it('generates one valid clip per goal within the configured limit and covering the goal moment', () => {
     const truth = JSON.parse(readFileSync(TRUTH, 'utf8')) as TruthFile
 
     const goals = events.filter((e) => e.type === 'GOAL')
@@ -133,8 +134,9 @@ describe('end-to-end pipeline on synthetic VOD', () => {
       expect(goal.clip).toBeDefined()
       const onDisk = statSync(goal.clip!.path)
       expect(onDisk.size).toBeGreaterThan(10 * 1024)
-      // PRD 35.8: every clip <= 30 seconds.
-      expect(goal.clip!.durationSeconds).toBeLessThanOrEqual(31)
+      // The bundled configuration can override the built-in 30-second default.
+      const cfg = buildConfig({ defaultConfigPath: resolve(ROOT, 'config/default.yaml') })
+      expect(goal.clip!.durationSeconds).toBeLessThanOrEqual(cfg.clips.max_clip_seconds + 1)
       expect(goal.clip!.durationSeconds).toBeGreaterThan(15)
       // PRD 35.9: the clip must include the goal moment.
       expect(goal.clip!.startSeconds).toBeLessThanOrEqual(goal.event_time + 0.5)

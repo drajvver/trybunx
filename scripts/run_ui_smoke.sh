@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ -n "${DISPLAY:-}" ]; then
+if [ "$(uname -s)" = "Darwin" ] || [ -n "${DISPLAY:-}" ]; then
   exec node --import tsx tests/electron_smoke.ts
 else
   if ! command -v xvfb-run > /dev/null; then

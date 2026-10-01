@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu } from 'electron'
 import { join, resolve } from 'path'
 import { readFileSync } from 'fs'
+import { rm } from 'fs/promises'
+import { randomUUID } from 'crypto'
 import { probeMedia } from './media/ffprobe'
 import { extractSingleFrame } from './media/frames'
 import { registerJobIpc } from './jobs/job_runner'
@@ -8,6 +10,8 @@ import { defaultConfigPath } from './paths'
 import { buildConfig } from './config/loader'
 import { loadSettings, saveSettings } from './settings'
 import { MediaInfo, Roi } from '../shared/contracts'
+
+app.commandLine.appendSwitch('lang', 'pl')
 
 // Running as root (e.g. CI containers) requires disabling the Chromium sandbox.
 if (process.platform === 'linux' && process.getuid && process.getuid() === 0) {
@@ -45,12 +49,32 @@ export function createMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'TrybunaTV', submenu: [
+      { label: 'O aplikacji', role: 'about' },
+      { type: 'separator' },
+      { label: 'Zakończ', role: 'quit' }
+    ] },
+    { label: 'Edycja', submenu: [
+      { label: 'Cofnij', role: 'undo' },
+      { label: 'Ponów', role: 'redo' },
+      { type: 'separator' },
+      { label: 'Wytnij', role: 'cut' },
+      { label: 'Kopiuj', role: 'copy' },
+      { label: 'Wklej', role: 'paste' },
+      { label: 'Zaznacz wszystko', role: 'selectAll' }
+    ] },
+    { label: 'Okno', submenu: [
+      { label: 'Minimalizuj', role: 'minimize' },
+      { label: 'Zamknij', role: 'close' }
+    ] }
+  ]))
   const win = createMainWindow()
-  registerAppIpc(win)
-  registerJobIpc(win)
+  registerAppIpc()
+  const manager = registerJobIpc(win)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
+    if (BrowserWindow.getAllWindows().length === 0) manager.attachWindow(createMainWindow())
   })
 })
 
@@ -58,7 +82,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-export function registerAppIpc(win: BrowserWindow): void {
+export function registerAppIpc(): void {
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -68,7 +92,10 @@ export function registerAppIpc(win: BrowserWindow): void {
   ipcMain.handle('settings:get', () => loadSettings())
 
   ipcMain.handle('settings:set', (_e, settings: AppSettings) => {
-    saveSettings(settings)
+    const current = loadSettings()
+    const next = { ...current, ...settings }
+    buildConfig({ defaultConfigPath: defaultConfigPath(), overrides: [next.configOverrides] })
+    saveSettings(next)
     return true
   })
 
@@ -82,8 +109,9 @@ export function registerAppIpc(win: BrowserWindow): void {
 
   ipcMain.handle('dialog:selectVideo', async () => {
     const settings = loadSettings()
-    const result = await dialog.showOpenDialog(win, {
-      title: 'Wybierz nagranie VOD',
+    const result = await dialog.showOpenDialog({
+      title: 'Wybierz nagranie meczu',
+      buttonLabel: 'Wybierz nagranie',
       properties: ['openFile'],
       defaultPath: settings.lastInputDir,
       filters: [
@@ -104,20 +132,25 @@ export function registerAppIpc(win: BrowserWindow): void {
   ipcMain.handle(
     'media:frame',
     async (_e, inputPath: string, timestamp: number): Promise<{ dataUrl: string; width: number; height: number } | null> => {
-      const tmp = join(app.getPath('temp'), `clip_hunter_frame_${Date.now()}.png`)
-      await extractSingleFrame(inputPath, timestamp, tmp)
-      const data = readFileSync(tmp)
-      const meta = await probeMedia(inputPath)
-      return {
-        dataUrl: `data:image/png;base64,${data.toString('base64')}`,
-        width: meta.width,
-        height: meta.height
+      const tmp = join(app.getPath('temp'), `clip_hunter_frame_${randomUUID()}.png`)
+      try {
+        await extractSingleFrame(inputPath, timestamp, tmp)
+        const data = readFileSync(tmp)
+        const meta = await probeMedia(inputPath)
+        return {
+          dataUrl: `data:image/png;base64,${data.toString('base64')}`,
+          width: meta.width,
+          height: meta.height
+        }
+      } finally {
+        await rm(tmp, { force: true }).catch(() => undefined)
       }
     }
   )
 
   ipcMain.handle('shell:openPath', async (_e, path: string) => {
-    await shell.openPath(path)
+    const error = await shell.openPath(path)
+    if (error) throw new Error('Nie udało się otworzyć folderu wyników.')
     return true
   })
 

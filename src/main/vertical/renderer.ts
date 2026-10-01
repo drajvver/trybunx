@@ -1,4 +1,5 @@
 import { writeFile } from 'fs/promises'
+import { basename } from 'path'
 import { AppConfig } from '../../shared/config'
 import { resolveBinary, runProcess } from '../media/process'
 import { probeMedia } from '../media/ffprobe'
@@ -144,7 +145,7 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
     const fps = Math.max(1, Math.round(opts.sourceFps)) || 25
     cmdPath = `${opts.tempDir}/vertical_${Date.now()}_${Math.floor(Math.random() * 1e6)}.cmd`
     await writeFile(cmdPath, buildSendcmd({ xs, fps, cropWidth: cropW, cropHeight: opts.sourceHeight, fallback: false }))
-    videoFilter = `sendcmd=f=${cmdPath},crop=${cropW}:${opts.sourceHeight}:x=0:y=0,scale=${v.width}:${v.height}:flags=lanczos`
+    videoFilter = `sendcmd=f=${basename(cmdPath)},crop=${cropW}:${opts.sourceHeight}:x=0:y=0,scale=${v.width}:${v.height}:flags=lanczos`
   } else {
     videoFilter = `crop=${cropW}:${opts.sourceHeight},scale=${v.width}:${v.height}:flags=lanczos`
   }
@@ -167,7 +168,7 @@ export async function renderVerticalClip(opts: VerticalRenderOptions): Promise<V
         '-avoid_negative_ts', 'make_zero',
         '-y', opts.outputPath
       ],
-      { signal: opts.signal, timeoutSeconds: 1800 }
+      { cwd: opts.tempDir, signal: opts.signal, timeoutSeconds: 1800 }
     )
   } finally {
     if (cmdPath) {

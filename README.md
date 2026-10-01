@@ -63,3 +63,7 @@ pionowego nagrania. Zmiany są zapisywane lokalnie na komputerze.
 
 Instrukcje dla osób rozwijających projekt, wymagania instalacyjne, testy i opis
 techniczny są w [docs/technical](docs/technical/README.md).
+
+## Gotowa aplikacja dla Windows x64
+
+Instalator EXE i pełny ZIP są dostępne w [wydaniach GitHub](https://github.com/drajvver/trybunx/releases). Nie trzeba osobno instalować Pythona ani FFmpeg. Wersję ZIP należy rozpakować w całości przed uruchomieniem aplikacji. [Instrukcja i opis budowania](docs/windows-packaging.md).

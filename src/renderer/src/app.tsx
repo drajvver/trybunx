@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AnalysisResult, MediaInfo, Roi } from '../../shared/contracts'
 import type { JobEventMessage } from './api'
 import { RoiEditor } from './components/RoiEditor'
+import { userError } from './errors'
 import { FileSection, ProgressPanel, ResultsPanel } from './components/panels'
 
 interface SettingsView {
@@ -64,6 +65,8 @@ function NumberSetting(props: {
   id: string
   label: string
   hint: string
+  increaseHint: string
+  decreaseHint: string
   value: number
   min: number
   step?: number
@@ -71,8 +74,8 @@ function NumberSetting(props: {
   onChange: (value: number) => void
 }): JSX.Element {
   return (
-    <label className="setting-field" htmlFor={props.id}>
-      <span>{props.label}</span>
+    <div className="setting-field">
+      <label htmlFor={props.id}>{props.label}</label>
       <input
         id={props.id}
         type="number"
@@ -80,10 +83,15 @@ function NumberSetting(props: {
         step={props.step ?? 1}
         value={props.value}
         disabled={props.disabled}
+        aria-describedby={`${props.id}-help`}
         onChange={(event) => props.onChange(Number(event.target.value))}
       />
-      <small>{props.hint}</small>
-    </label>
+      <div id={`${props.id}-help`} className="setting-help">
+        <small>{props.hint}</small>
+        <small><strong>Zwiększ:</strong> {props.increaseHint}</small>
+        <small><strong>Zmniejsz:</strong> {props.decreaseHint}</small>
+      </div>
+    </div>
   )
 }
 
@@ -106,6 +114,7 @@ const INITIAL_STAGES: StageUi[] = [
 const DEFAULT_FRAME_TIME = 60
 
 export function App(): JSX.Element {
+  const probeRequest = useRef(0)
   const [inputPath, setInputPath] = useState<string | null>(null)
   const [media, setMedia] = useState<MediaInfo | null>(null)
   const [probing, setProbing] = useState(false)
@@ -126,10 +135,14 @@ export function App(): JSX.Element {
   // Load persisted settings (ROI survives restarts; PRD 29.2).
   useEffect(() => {
     void (async () => {
-      const settings = await window.clipHunter.getSettings()
-      if (settings.roi) setRoi(settings.roi)
-      setSavedSettings(settings)
-      setConfig(asSettingsView(await window.clipHunter.getConfig()))
+      try {
+        const settings = await window.clipHunter.getSettings()
+        if (settings.roi) setRoi(settings.roi)
+        setSavedSettings(settings)
+        setConfig(asSettingsView(await window.clipHunter.getConfig()))
+      } catch (err) {
+        setSettingsStatus(userError(err, 'Nie udało się wczytać ustawień. Otwórz ustawienia i wybierz „Przywróć zalecane ustawienia”.'))
+      }
     })()
   }, [])
 
@@ -159,30 +172,46 @@ export function App(): JSX.Element {
         setJobError('Analiza została anulowana.')
       }
     })
+    void window.clipHunter.getCurrentJob().then((job) => {
+      if (job) {
+        setRunning(job.status === 'running' || job.status === 'queued')
+        setStages(job.stages)
+      }
+    }).catch(() => setJobError('Nie udało się odczytać stanu analizy.'))
     return unsub
   }, [])
 
   const selectVideo = async () => {
     setFileError(null)
-    const path = await window.clipHunter.selectVideo()
-    if (!path) return
-    setInputPath(path)
-    setProbing(true)
     try {
-      const info = await window.clipHunter.probeMedia(path)
-      setMedia(info)
-    } catch (err) {
+      const path = await window.clipHunter.selectVideo()
+      if (!path) return
+      const request = ++probeRequest.current
+      setInputPath(path)
       setMedia(null)
-      setFileError((err as Error).message)
-    } finally {
-      setProbing(false)
+      setProbing(true)
+      try {
+        const info = await window.clipHunter.probeMedia(path)
+        if (request !== probeRequest.current) return
+        setMedia(info)
+        setFrameTime(Math.min(DEFAULT_FRAME_TIME, Math.max(0, info.durationSeconds - 0.1)))
+      } catch (err) {
+        if (request === probeRequest.current) setFileError(userError(err, 'Nie udało się odczytać nagrania. Wybierz poprawny plik wideo.'))
+      } finally {
+        if (request === probeRequest.current) setProbing(false)
+      }
+    } catch (err) {
+      setFileError(userError(err, 'Nie udało się otworzyć wyboru nagrania.'))
     }
   }
 
   const onRoiChange = async (next: Roi | null) => {
     setRoi(next)
-    const settings = await window.clipHunter.getSettings()
-    await window.clipHunter.saveSettings({ ...settings, roi: next })
+    try {
+      await window.clipHunter.saveSettings({ roi: next })
+    } catch (err) {
+      setSettingsStatus(userError(err, 'Nie udało się zapisać obszaru wyniku.'))
+    }
   }
 
   const startAnalysis = async () => {
@@ -194,45 +223,54 @@ export function App(): JSX.Element {
         : undefined
       await window.clipHunter.startJob({ inputPath, roi, configOverrides })
     } catch (err) {
-      setJobError((err as Error).message)
+      setJobError(userError(err, 'Nie udało się rozpocząć analizy.'))
       setRunning(false)
     }
   }
 
   const cancelAnalysis = async () => {
     setCancelling(true)
-    await window.clipHunter.cancelJob()
-    setCancelling(false)
+    try {
+      await window.clipHunter.cancelJob()
+    } catch (err) {
+      setJobError(userError(err, 'Nie udało się anulować analizy.'))
+    } finally {
+      setCancelling(false)
+    }
   }
 
-  const canStart = !!inputPath && !!roi && !!media && !running
+  const canStart = !!inputPath && !!roi && !!media && !!config && !probing && !running
 
   const updateConfig = (section: keyof SettingsView, field: string, value: number | boolean) => {
     setConfig((current) => current && {
       ...current,
       [section]: { ...current[section], [field]: value }
     })
-    setSettingsStatus('Niezapisane zmiany')
+    setSettingsStatus('Zmiany nie są zapisane. Będą użyte w najbliższej analizie; zapisz je, aby zachować je na później.')
   }
 
   const saveConfig = async () => {
     if (!config) return
-    const next = {
-      ...(savedSettings ?? {}),
-      configOverrides: mergeOverrides(savedSettings?.configOverrides ?? {}, overridesFor(config))
+    try {
+      const current = await window.clipHunter.getSettings()
+      const configOverrides = mergeOverrides(current.configOverrides ?? {}, overridesFor(config))
+      await window.clipHunter.saveSettings({ configOverrides })
+      setSavedSettings({ ...current, configOverrides })
+      setSettingsStatus('Zapisano ustawienia. Aplikacja użyje ich także przy kolejnych nagraniach.')
+    } catch (err) {
+      setSettingsStatus(userError(err, 'Nie udało się zapisać ustawień.'))
     }
-    await window.clipHunter.saveSettings(next)
-    setSavedSettings(next)
-    setSettingsStatus('Zapisano — ustawienia będą używane w kolejnych analizach')
   }
 
   const resetConfig = async () => {
-    const next = { ...(savedSettings ?? {}) }
-    delete next.configOverrides
-    await window.clipHunter.saveSettings(next)
-    setSavedSettings(next)
-    setConfig(asSettingsView(await window.clipHunter.getConfig()))
-    setSettingsStatus('Przywrócono ustawienia domyślne z pliku konfiguracji')
+    try {
+      await window.clipHunter.saveSettings({ configOverrides: null })
+      setSavedSettings(await window.clipHunter.getSettings())
+      setConfig(asSettingsView(await window.clipHunter.getConfig()))
+      setSettingsStatus('Przywrócono zalecane ustawienia. Obszar wyniku został zachowany.')
+    } catch (err) {
+      setSettingsStatus(userError(err, 'Nie udało się przywrócić ustawień.'))
+    }
   }
 
   return (
@@ -251,10 +289,10 @@ export function App(): JSX.Element {
       />
 
       <section className="card">
-        <h2>2. Obszar wyniku</h2>
+        <h2>2. Pokaż, gdzie na ekranie jest wynik</h2>
         <div className="row">
           <label className="frame-time">
-            Czas klatki (s):
+            Moment nagrania do podglądu (sekundy):
             <input
               type="number"
               min={0}
@@ -264,62 +302,65 @@ export function App(): JSX.Element {
             />
           </label>
           <span className="hint">
-            Wybierz moment, w którym wynik jest dobrze widoczny, a następnie zaznacz prostokąt.
+            Zwiększ czas, aby zobaczyć późniejszy fragment; zmniejsz, aby zobaczyć wcześniejszy. Wybierz moment z dobrze widocznym wynikiem. Ten czas nie ogranicza analizy — aplikacja sprawdzi całe nagranie.
           </span>
         </div>
         <RoiEditor inputPath={inputPath ?? ''} frameTime={frameTime} roi={roi} onRoiChange={(r) => void onRoiChange(r)} />
       </section>
 
       <section className="card">
-        <h2>3. Rozpocznij analizę</h2>
+        <h2>3. Znajdź bramki i przygotuj klipy</h2>
         <details className="optional-settings">
-          <summary>Dostosuj działanie aplikacji</summary>
-          <p className="hint">Domyślne ustawienia sprawdzają się w większości nagrań. Zmieniaj je tylko wtedy, gdy chcesz uzyskać inny efekt.</p>
+          <summary>Ustawienia klipów i wyszukiwania momentów</summary>
+          <p className="hint">Możesz zacząć bez zmian. Przy każdym ustawieniu znajdziesz opis jego działania oraz efekt zwiększenia i zmniejszenia wartości.</p>
           {config && (
             <div className="settings-editor">
             <fieldset>
-              <legend>Interesujące momenty</legend>
+              <legend>Szukanie emocjonujących momentów po dźwięku</legend>
               <label className="toggle-setting">
                 <input type="checkbox" checked={config.audio.enabled} onChange={(event) => updateConfig('audio', 'enabled', event.target.checked)} />
-                Analizuj dźwięk trybun i komentarza
+                Wykorzystaj reakcje trybun i komentatora do szukania momentów
               </label>
+              <p className="hint">Po wyłączeniu aplikacja będzie szukać bramek tylko po zmianie wyniku na ekranie.</p>
               <label className="toggle-setting">
                 <input type="checkbox" checked={config.clips.create_clips_for_unknown} onChange={(event) => updateConfig('clips', 'create_clips_for_unknown', event.target.checked)} disabled={!config.audio.enabled} />
-                Twórz klipy dla interesujących momentów wykrytych wyłącznie przez dźwięk
+                Twórz także klipy z głośnych reakcji, nawet bez zmiany wyniku
               </label>
+              <p className="hint">Po włączeniu powstaną też klipy z dopingu i głośnego komentarza. Te momenty nie muszą być bramkami. Po wyłączeniu klipy powstaną tylko dla wykrytych bramek.</p>
               <div className="settings-fields">
-                <NumberSetting id="audio-threshold" label="Próg emocji (dB)" hint="Głośność powyżej ruchomego poziomu bazowego" value={config.audio.spike_threshold_db} min={0} step={0.5} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'spike_threshold_db', value)} />
-                <NumberSetting id="audio-baseline" label="Okno poziomu bazowego (s)" hint="Zwykły poziom trybun używany do porównania" value={config.audio.baseline_seconds} min={1} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'baseline_seconds', value)} />
-                <NumberSetting id="audio-cooldown" label="Odstęp między pikami (s)" hint="Zapobiega powtarzaniu jednego momentu podczas dopingu" value={config.audio.spike_cooldown_seconds} min={0} step={0.1} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'spike_cooldown_seconds', value)} />
-                <NumberSetting id="silence-floor" label="Próg ciszy (dB)" hint="Pomija niewielkie zmiany w tle" value={config.audio.silence_floor_db} min={-100} step={1} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'silence_floor_db', value)} />
+                <NumberSetting id="audio-threshold" label="Jak duży wzrost głośności uznać za emocje (dB)" hint="Aplikacja porównuje głośność z wcześniejszym fragmentem. dB to jednostka różnicy głośności." increaseHint="wybierze tylko wyraźniejsze reakcje; może pominąć cichszy doping." decreaseHint="wyłapie słabsze reakcje, ale może też wybrać zwykły hałas." value={config.audio.spike_threshold_db} min={0} step={0.5} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'spike_threshold_db', value)} />
+                <NumberSetting id="audio-baseline" label="Z ilu sekund porównywać głośność" hint="Tyle wcześniejszych sekund służy do ustalenia zwykłej głośności nagrania." increaseHint="wolniej przyzwyczai się do dłuższego dopingu i zmian głośności." decreaseHint="szybciej przyzwyczai się do dopingu, więc jego dalszy ciąg może już nie wyróżniać się głośnością." value={config.audio.baseline_seconds} min={1} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'baseline_seconds', value)} />
+                <NumberSetting id="audio-cooldown" label="Przerwa między wykrytymi reakcjami (sekundy)" hint="Po wykryciu głośnej reakcji aplikacja przez ten czas nie wybiera następnej." increaseHint="ograniczy powtórzenia tej samej reakcji, ale może pominąć kolejną, bliską w czasie." decreaseHint="wyłapie reakcje bliżej siebie; długi doping może zostać wykryty kilka razy." value={config.audio.spike_cooldown_seconds} min={0} step={0.1} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'spike_cooldown_seconds', value)} />
+                <NumberSetting id="silence-floor" label="Pomijaj dźwięki cichsze niż (dB)" hint="Pomaga pomijać ciche tło. W tej skali liczby są ujemne: −40 jest wyższą wartością niż −60." increaseHint="np. z −60 do −40: odrzuci więcej cichych fragmentów." decreaseHint="np. z −40 do −60: dopuści cichsze fragmenty, także szum tła." value={config.audio.silence_floor_db} min={-100} step={1} disabled={!config.audio.enabled} onChange={(value) => updateConfig('audio', 'silence_floor_db', value)} />
               </div>
             </fieldset>
             <fieldset>
-              <legend>Czas trwania klipu</legend>
+              <legend>Ile akcji zachować w klipie</legend>
               <div className="settings-fields">
-                <NumberSetting id="pre-roll" label="Przed zdarzeniem (s)" hint="Kontekst przed momentem" value={config.clips.goal_pre_roll_seconds} min={0} onChange={(value) => updateConfig('clips', 'goal_pre_roll_seconds', value)} />
-                <NumberSetting id="post-roll" label="Po zdarzeniu (s)" hint="Reakcja po momencie" value={config.clips.goal_post_roll_seconds} min={0} onChange={(value) => updateConfig('clips', 'goal_post_roll_seconds', value)} />
-                <NumberSetting id="max-length" label="Maksymalna długość (s)" hint="Ogranicza długość każdego klipu" value={config.clips.max_clip_seconds} min={1} onChange={(value) => updateConfig('clips', 'max_clip_seconds', value)} />
+                <NumberSetting id="pre-roll" label="Ile sekund przed bramką zostawić" hint="Dotyczy także innych wybranych momentów, jeśli tworzysz dla nich klipy." increaseHint="pokaże więcej akcji prowadzącej do bramki, o ile pozwala na to limit długości klipu." decreaseHint="klip zacznie się bliżej bramki i pokaże mniej wcześniejszej akcji." value={config.clips.goal_pre_roll_seconds} min={0} onChange={(value) => updateConfig('clips', 'goal_pre_roll_seconds', value)} />
+                <NumberSetting id="post-roll" label="Ile sekund po bramce zostawić" hint="Pozwala zachować celebrację, reakcję trybun lub powtórkę." increaseHint="pokaże więcej po bramce, o ile pozwala na to limit długości klipu." decreaseHint="klip skończy się wcześniej i pokaże mniej reakcji po bramce." value={config.clips.goal_post_roll_seconds} min={0} onChange={(value) => updateConfig('clips', 'goal_post_roll_seconds', value)} />
+                <NumberSetting id="max-length" label="Najdłuższy klip (sekundy)" hint="Jeśli czas przed i po bramce przekracza ten limit, aplikacja skróci klip, zachowując moment bramki." increaseHint="pozwoli zachować dłuższe klipy; nie wydłuży ich ponad wybrane czasy przed i po bramce." decreaseHint="skróci zbyt długie klipy i ograniczy pokazywaną akcję oraz reakcje." value={config.clips.max_clip_seconds} min={1} onChange={(value) => updateConfig('clips', 'max_clip_seconds', value)} />
               </div>
             </fieldset>
             <details>
-              <summary>Zaawansowane: czas bramki i śledzenie piłki</summary>
+              <summary>Dodatkowe ustawienia: czas bramki i pionowe klipy</summary>
               <div className="settings-fields advanced-fields">
-                <NumberSetting id="goal-lookback" label="Analiza dźwięku przed bramką (s)" hint="Wyszukuje pik przed zmianą wyniku" value={config.goal_detection.audio_lookback_seconds} min={0} onChange={(value) => updateConfig('goal_detection', 'audio_lookback_seconds', value)} />
-                <NumberSetting id="goal-fallback" label="Zapasowe przesunięcie bramki (s)" hint="Używane, gdy nie wykryto silnego piku trybun" value={config.goal_detection.fallback_offset_seconds} min={0} onChange={(value) => updateConfig('goal_detection', 'fallback_offset_seconds', value)} />
-                <NumberSetting id="dedup" label="Usuwanie duplikatów bramki (s)" hint="Łączy powtórzone zdarzenia z taką samą zmianą wyniku" value={config.goal_detection.dedup_seconds} min={0} onChange={(value) => updateConfig('goal_detection', 'dedup_seconds', value)} />
-                <NumberSetting id="ball-trust" label="Pewność wykrycia piłki" hint="Wyższa wartość odrzuca niepewne wykrycia" value={config.vertical.ball_trust} min={0} step={0.05} onChange={(value) => updateConfig('vertical', 'ball_trust', value)} />
-                <NumberSetting id="ball-confirmation" label="Potwierdzenia piłki" hint="Powiązane odczyty przed rozpoczęciem śledzenia" value={config.vertical.ball_confirmation_frames} min={1} onChange={(value) => updateConfig('vertical', 'ball_confirmation_frames', Math.round(value))} />
-                <NumberSetting id="goal-side-room" label="Miejsce w stronę bramki" hint="Część kadru zachowana za piłką przy linii bocznej" value={config.vertical.ball_lead_fraction} min={0} step={0.05} onChange={(value) => updateConfig('vertical', 'ball_lead_fraction', value)} />
-                <label className="toggle-setting"><input type="checkbox" checked={config.vertical.wide_fallback_enabled} onChange={(event) => updateConfig('vertical', 'wide_fallback_enabled', event.target.checked)} /> Zachowaj szerokie ujęcie po utracie piłki</label>
-                <NumberSetting id="tracking-rate" label="Próbki śledzenia / sekundę" hint="Wyższa wartość lepiej śledzi ruch, ale wydłuża analizę" value={config.vertical.track_sample_fps} min={1} step={1} onChange={(value) => updateConfig('vertical', 'track_sample_fps', value)} />
+                <NumberSetting id="goal-lookback" label="Jak daleko przed zmianą wyniku szukać reakcji (sekundy)" hint="Wynik na ekranie zwykle zmienia się po bramce. Reakcja trybun pomaga ustalić, kiedy piłka wpadła do siatki." increaseHint="uwzględni wcześniejsze reakcje; przy dużym opóźnieniu grafiki może pomóc, ale może też wybrać inną reakcję." decreaseHint="szuka tylko bliżej zmiany wyniku; może pominąć reakcję, jeśli grafika wyniku zmienia się późno." value={config.goal_detection.audio_lookback_seconds} min={0} onChange={(value) => updateConfig('goal_detection', 'audio_lookback_seconds', value)} />
+                <NumberSetting id="goal-fallback" label="O ile sekund cofnąć czas bramki bez reakcji trybun" hint="Jeśli nie ma wyraźnej reakcji, aplikacja odejmuje tyle sekund od chwili zmiany wyniku." increaseHint="uzna, że bramka padła wcześniej, i przesunie klip wstecz." decreaseHint="uzna, że bramka padła bliżej zmiany wyniku, i przesunie klip później." value={config.goal_detection.fallback_offset_seconds} min={0} onChange={(value) => updateConfig('goal_detection', 'fallback_offset_seconds', value)} />
+                <NumberSetting id="dedup" label="Przez ile sekund pomijać powtórne wykrycie bramki" hint="Dotyczy wyłącznie tej samej zmiany wyniku. Różne bramki pozostają osobnymi momentami." increaseHint="przez dłuższy czas będzie pomijać kolejne wykrycia tej samej bramki." decreaseHint="szybciej pozwoli na kolejne wykrycie tej samej bramki; może pojawić się więcej powtórzeń." value={config.goal_detection.dedup_seconds} min={0} onChange={(value) => updateConfig('goal_detection', 'dedup_seconds', value)} />
+                <NumberSetting id="ball-trust" label="Wymagana pewność rozpoznania piłki (0–1)" hint="Określa, jak pewne musi być rozpoznanie, by pionowy klip podążał za piłką. 0 oznacza brak dodatkowych wymagań, 1 — najwyższą pewność." increaseHint="rzadziej pomyli inny obiekt z piłką, ale może częściej kierować obraz na zawodników." decreaseHint="łatwiej zacznie podążać za piłką, ale może pomylić ją z innym obiektem." value={config.vertical.ball_trust} min={0} step={0.05} onChange={(value) => updateConfig('vertical', 'ball_trust', value)} />
+                <NumberSetting id="ball-confirmation" label="Ile razy rozpoznać piłkę przed podążaniem za nią" hint="Aplikacja musi rozpoznać piłkę tyle razy z rzędu w pobliskich miejscach obrazu." increaseHint="poczeka na więcej potwierdzeń; zmniejszy pomyłki, ale później zacznie podążać za piłką." decreaseHint="szybciej zacznie podążać za piłką, także przy krótkim pojawieniu się; łatwiej o pomyłkę." value={config.vertical.ball_confirmation_frames} min={1} onChange={(value) => updateConfig('vertical', 'ball_confirmation_frames', Math.round(value))} />
+                <NumberSetting id="goal-side-room" label="Położenie piłki w pionowym obrazie (0–0,5)" hint="0,5 umieszcza piłkę na środku. Mniejsza wartość zostawia więcej miejsca w stronę najbliższej bramki." increaseHint="piłka znajdzie się bliżej środka, a w stronę bramki będzie mniej miejsca." decreaseHint="piłka znajdzie się bliżej bocznej krawędzi, a w stronę bramki będzie więcej miejsca." value={config.vertical.ball_lead_fraction} min={0} step={0.05} onChange={(value) => updateConfig('vertical', 'ball_lead_fraction', value)} />
+                <label className="toggle-setting"><input type="checkbox" checked={config.vertical.wide_fallback_enabled} onChange={(event) => updateConfig('vertical', 'wide_fallback_enabled', event.target.checked)} /> Pokaż całe boisko w pionowym klipie, gdy trudno śledzić piłkę</label>
+                <p className="hint">Po włączeniu aplikacja może zachować szeroki obraz boiska na rozmytym tle, gdy nie ma pewnego śledzenia piłki i zawodnicy zajmują dużą część obrazu. Po wyłączeniu pionowy klip pozostaje wycinkiem obrazu.</p>
+                <NumberSetting id="tracking-rate" label="Ile razy na sekundę sprawdzać położenie piłki" hint="To liczba sprawdzeń położenia piłki i zawodników, a nie liczba klatek w gotowym klipie." increaseHint="lepiej wychwyci szybki ruch, ale przygotowanie pionowych klipów może potrwać dłużej." decreaseHint="zmniejszy liczbę sprawdzeń i może przyspieszyć pracę, ale łatwiej przeoczyć szybki ruch." value={config.vertical.track_sample_fps} min={1} step={1} onChange={(value) => updateConfig('vertical', 'track_sample_fps', value)} />
               </div>
             </details>
             </div>
           )}
           <div className="row settings-actions">
-            <button onClick={() => void saveConfig()} disabled={!config}>Zapisz moje ustawienia</button>
-            <button className="secondary" onClick={() => void resetConfig()} disabled={!config}>Przywróć ustawienia domyślne</button>
+            <button onClick={() => void saveConfig()} disabled={!config}>Zapisz ustawienia na przyszłość</button>
+            <button className="secondary" onClick={() => void resetConfig()}>Przywróć zalecane ustawienia</button>
             {settingsStatus && <span className="hint" role="status">{settingsStatus}</span>}
           </div>
         </details>

@@ -31,7 +31,11 @@ export interface ActiveJob {
 export class JobManager {
   private active: ActiveJob | null = null
 
-  constructor(private readonly win: BrowserWindow) {}
+  constructor(private win: BrowserWindow) {}
+
+  attachWindow(win: BrowserWindow): void {
+    this.win = win
+  }
 
   private send(channel: string, payload: unknown): void {
     if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload)
@@ -58,6 +62,10 @@ export class JobManager {
     }
 
     const settings = loadSettings()
+    const config = buildConfig({
+      defaultConfigPath: defaultConfigPath(),
+      overrides: [settings.configOverrides, configOverrides]
+    })
     saveSettings({ ...settings, roi, ...(configOverrides ? { configOverrides } : {}) })
 
     const id = `job_${Date.now().toString(36)}`
@@ -71,10 +79,6 @@ export class JobManager {
     }
 
     const controller = new AbortController()
-    const config = buildConfig({
-      defaultConfigPath: defaultConfigPath(),
-      overrides: [settings.configOverrides, configOverrides]
-    })
 
     const updateStage = (name: StageName, status: StageStatus, progress?: number, detail?: string) => {
       const stage = job.stages.find((s) => s.name === name)
@@ -104,7 +108,8 @@ export class JobManager {
         job.outputDir = result.analysis.output_dir
         this.send('job:event', { type: 'completed', jobId: id, result })
       } catch (err) {
-        const message = (err as Error).message || String(err)
+        console.error('Analysis failed', err)
+        const message = 'Nie udało się zakończyć analizy. Spróbuj ponownie. Jeśli problem się powtarza, sprawdź, czy nagranie odtwarza się poprawnie.'
         job.finishedAt = new Date().toISOString()
         if (controller.signal.aborted) {
           job.status = 'cancelled'

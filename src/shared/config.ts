@@ -210,6 +210,7 @@ export function clamp(value: number, min: number, max: number): number {
 
 /** Clamp a normalized ROI to valid bounds and drop degenerate sizes. */
 export function sanitizeRoi(roi: Roi): Roi | null {
+  if (![roi.x, roi.y, roi.width, roi.height].every(Number.isFinite)) return null
   const x = clamp(roi.x, 0, 1)
   const y = clamp(roi.y, 0, 1)
   const w = clamp(roi.width, 0, 1 - x)
@@ -248,63 +249,79 @@ export function resolveConfig(...overrides: Array<unknown>): AppConfig {
 }
 
 function validateConfig(cfg: AppConfig): void {
-  if (cfg.analysis.ocr_interval_ms < 50) throw new Error('analysis.ocr_interval_ms must be >= 50')
-  if (cfg.analysis.fine_ocr_interval_ms < 20) throw new Error('analysis.fine_ocr_interval_ms must be >= 20')
-  if (!['auto', 'videotoolbox', 'software'].includes(cfg.analysis.decode_acceleration)) {
-    throw new Error('analysis.decode_acceleration must be "auto", "videotoolbox", or "software"')
+  const validateShape = (value: unknown, defaults: unknown, path: string): void => {
+    if (typeof defaults === 'object' && defaults !== null) {
+      if (!isPlainObject(value)) throw new Error(`Nieprawidłowa sekcja ustawień: ${path}`)
+      for (const [key, item] of Object.entries(defaults)) validateShape(value[key], item, `${path}.${key}`)
+    } else if (typeof value !== typeof defaults || (typeof value === 'number' && !Number.isFinite(value))) {
+      throw new Error(`Nieprawidłowa wartość ustawienia: ${path}`)
+    }
   }
-  if (cfg.ocr.confirmation_reads < 2) throw new Error('ocr.confirmation_reads must be >= 2')
+  validateShape(cfg, DEFAULT_CONFIG, 'konfiguracja')
+  for (const value of [cfg.clips.goal_pre_roll_seconds, cfg.clips.goal_post_roll_seconds,
+    cfg.audio.baseline_seconds, cfg.audio.spike_cooldown_seconds,
+    cfg.goal_detection.audio_lookback_seconds, cfg.goal_detection.fallback_offset_seconds,
+    cfg.goal_detection.dedup_seconds]) {
+    if (value < 0) throw new Error('Czasy w ustawieniach nie mogą być ujemne.')
+  }
+  if (cfg.audio.sample_rate <= 0) throw new Error('Częstotliwość dźwięku musi być dodatnia.')
+  if (cfg.analysis.ocr_interval_ms < 50) throw new Error('analysis.ocr_interval_ms musi być >= 50')
+  if (cfg.analysis.fine_ocr_interval_ms < 20) throw new Error('analysis.fine_ocr_interval_ms musi być >= 20')
+  if (!['auto', 'videotoolbox', 'software'].includes(cfg.analysis.decode_acceleration)) {
+    throw new Error('analysis.decode_acceleration musi być "auto", "videotoolbox" lub "software"')
+  }
+  if (cfg.ocr.confirmation_reads < 2) throw new Error('ocr.confirmation_reads musi być >= 2')
   if (cfg.ocr.engine !== 'neural' && cfg.ocr.engine !== 'tesseract') {
-    throw new Error('ocr.engine must be "neural" or "tesseract"')
+    throw new Error('ocr.engine musi być "neural" lub "tesseract"')
   }
   if (!['auto', 'coreml', 'cpu'].includes(cfg.ocr.provider)) {
-    throw new Error('ocr.provider must be "auto", "coreml", or "cpu"')
+    throw new Error('ocr.provider musi być "auto", "coreml" lub "cpu"')
   }
-  if (cfg.ocr.change_threshold < 0) throw new Error('ocr.change_threshold must be >= 0')
+  if (cfg.ocr.change_threshold < 0) throw new Error('ocr.change_threshold musi być >= 0')
   if (cfg.ocr.refresh_interval_seconds <= 0) {
-    throw new Error('ocr.refresh_interval_seconds must be > 0')
+    throw new Error('ocr.refresh_interval_seconds musi być > 0')
   }
-  if (cfg.audio.rms_window_ms < 10) throw new Error('audio.rms_window_ms must be >= 10')
-  if (cfg.clips.max_clip_seconds <= 0) throw new Error('clips.max_clip_seconds must be > 0')
+  if (cfg.audio.rms_window_ms < 10) throw new Error('audio.rms_window_ms musi być >= 10')
+  if (cfg.clips.max_clip_seconds <= 0) throw new Error('clips.max_clip_seconds musi być > 0')
   if (cfg.clips.encoding !== 'reencode' && cfg.clips.encoding !== 'copy') {
-    throw new Error('clips.encoding must be "reencode" or "copy"')
+    throw new Error('clips.encoding musi być "reencode" lub "copy"')
   }
   const v = (cfg as AppConfig).vertical
   if (v) {
-    if (v.width <= 0 || v.height <= 0) throw new Error('vertical.width/height must be > 0')
+    if (v.width <= 0 || v.height <= 0) throw new Error('vertical.width/height musi być > 0')
     if (v.track_sample_fps <= 0 || v.track_sample_fps > 30) {
-      throw new Error('vertical.track_sample_fps must be in (0, 30]')
+      throw new Error('vertical.track_sample_fps musi należeć do (0, 30]')
     }
     if (v.min_confidence < 0 || v.min_confidence > 1) {
-      throw new Error('vertical.min_confidence must be in [0, 1]')
+      throw new Error('vertical.min_confidence musi należeć do [0, 1]')
     }
     if (v.person_confidence < 0 || v.person_confidence > 1) {
-      throw new Error('vertical.person_confidence must be in [0, 1]')
+      throw new Error('vertical.person_confidence musi należeć do [0, 1]')
     }
     if (v.person_iou < 0 || v.person_iou > 1) {
-      throw new Error('vertical.person_iou must be in [0, 1]')
+      throw new Error('vertical.person_iou musi należeć do [0, 1]')
     }
-    if (v.cluster_top_k < 1) throw new Error('vertical.cluster_top_k must be >= 1')
-    if (v.cluster_padding < 0) throw new Error('vertical.cluster_padding must be >= 0')
+    if (v.cluster_top_k < 1) throw new Error('vertical.cluster_top_k musi być >= 1')
+    if (v.cluster_padding < 0) throw new Error('vertical.cluster_padding musi być >= 0')
     if (v.ball_trust < 0 || v.ball_trust > 1) {
-      throw new Error('vertical.ball_trust must be in [0, 1]')
+      throw new Error('vertical.ball_trust musi należeć do [0, 1]')
     }
     if (!Number.isInteger(v.ball_confirmation_frames) || v.ball_confirmation_frames < 1) {
-      throw new Error('vertical.ball_confirmation_frames must be an integer >= 1')
+      throw new Error('vertical.ball_confirmation_frames musi być liczbą całkowitą >= 1')
     }
     if (v.ball_lead_fraction < 0 || v.ball_lead_fraction > 0.5) {
-      throw new Error('vertical.ball_lead_fraction must be in [0, 0.5]')
+      throw new Error('vertical.ball_lead_fraction musi należeć do [0, 0.5]')
     }
     if (v.cluster_trust < 0 || v.cluster_trust > 1) {
-      throw new Error('vertical.cluster_trust must be in [0, 1]')
+      throw new Error('vertical.cluster_trust musi należeć do [0, 1]')
     }
     if (v.resync_after_lost_seconds < 0) {
-      throw new Error('vertical.resync_after_lost_seconds must be >= 0')
+      throw new Error('vertical.resync_after_lost_seconds musi być >= 0')
     }
-    if (v.smoothing_window_seconds < 0) throw new Error('vertical.smoothing_window_seconds must be >= 0')
-    if (v.max_pan_speed <= 0) throw new Error('vertical.max_pan_speed must be > 0')
-    if (v.lost_hold_seconds < 0) throw new Error('vertical.lost_hold_seconds must be >= 0')
-    if (v.recenter_seconds < 0) throw new Error('vertical.recenter_seconds must be >= 0')
-    if (v.video_crf < 0 || v.video_crf > 51) throw new Error('vertical.video_crf must be in [0, 51]')
+    if (v.smoothing_window_seconds < 0) throw new Error('vertical.smoothing_window_seconds musi być >= 0')
+    if (v.max_pan_speed <= 0) throw new Error('vertical.max_pan_speed musi być > 0')
+    if (v.lost_hold_seconds < 0) throw new Error('vertical.lost_hold_seconds musi być >= 0')
+    if (v.recenter_seconds < 0) throw new Error('vertical.recenter_seconds musi być >= 0')
+    if (v.video_crf < 0 || v.video_crf > 51) throw new Error('vertical.video_crf musi należeć do [0, 51]')
   }
 }

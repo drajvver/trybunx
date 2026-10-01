@@ -24,7 +24,13 @@ export function computeClipWindow(
   let start = Math.max(0, eventTime - pre)
   let end = Math.min(durationSeconds, eventTime + post)
 
-  if (end - start > maxLen) end = start + maxLen
+  if (end - start > maxLen) {
+    // Share the available time between lead-in and aftermath, keeping the event inside.
+    const lead = maxLen * (pre / Math.max(pre + post, 0.001))
+    start = Math.max(0, eventTime - lead)
+    end = Math.min(durationSeconds, start + maxLen)
+    start = Math.max(0, end - maxLen)
+  }
   // Guarantee a usable clip even at hard boundaries.
   if (end - start < 0.5) {
     start = Math.max(0, Math.min(start, durationSeconds - 0.5))
@@ -104,7 +110,7 @@ async function cutClip(
         ]
 
   await runProcess(resolveBinary('ffmpeg'), args, { signal, timeoutSeconds: 1800 })
-  return cfg.encoding === 'copy'
+  return cfg.encoding !== 'copy'
 }
 
 /** Generate all clips for the given events. Individual failures do not abort the rest. */

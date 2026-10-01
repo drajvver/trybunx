@@ -1,0 +1,53 @@
+name: Windows x64
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run dist:win
+      - name: Verify relocated packaged resources offline
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$pwd/dist/win-unpacked/resources/python/vendor;$pwd/dist/win-unpacked/resources/python"
+          & "dist/win-unpacked/resources/runtime/python.exe" scripts/verify_windows_bundle.py dist/win-unpacked/resources
+          if ($LASTEXITCODE -ne 0) { throw "Packaged runtime verification failed" }
+      - name: Install and launch application
+        shell: pwsh
+        run: |
+          $Installer = Get-ChildItem dist/Trybunx-Setup-*-windows-x64.exe | Select-Object -First 1
+          $InstallDir = Join-Path $env:RUNNER_TEMP "TrybunxApp"
+          $Process = Start-Process $Installer.FullName -ArgumentList "/S /D=$InstallDir" -Wait -PassThru
+          if ($Process.ExitCode -ne 0) { throw "Installer failed: $($Process.ExitCode)" }
+          $AppExe = Join-Path $InstallDir "TrybunaTV AI Clip Hunter.exe"
+          if (-not (Test-Path $AppExe)) { throw "Installed application missing" }
+          npx tsx scripts/smoke_windows_app.ts $AppExe
+          if ($LASTEXITCODE -ne 0) { throw "Installed application failed to launch" }
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/Trybunx-*.exe,dist/Trybunx-*.zip | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Trybunx-Windows-x64
+          path: |
+            dist/Trybunx-*.exe
+            dist/Trybunx-*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error

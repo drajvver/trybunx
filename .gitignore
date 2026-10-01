@@ -17,3 +17,6 @@ python/.requirements.lock
 python/track/models/*.onnx
 python/track/models/*.pt
 !python/track/models/.gitkeep
+
+.windows-build/
+release-artifacts/

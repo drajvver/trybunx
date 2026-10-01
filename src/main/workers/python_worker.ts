@@ -52,6 +52,7 @@ export class PythonWorker {
     this.starting = (async () => {
       this.dead = false
       const child = spawn(this.opts.pythonPath, [this.opts.scriptPath], {
+        windowsHide: true,
         cwd: this.opts.cwd,
         env: this.opts.env ? { ...process.env, ...this.opts.env } : process.env,
         stdio: ['pipe', 'pipe', 'pipe']
@@ -71,9 +72,20 @@ export class PythonWorker {
       })
 
       if (signal) {
-        this.abortHandler = () => child.kill('SIGTERM')
-        if (signal.aborted) this.abortHandler()
-        else signal.addEventListener('abort', this.abortHandler, { once: true })
+        let forceTimer: NodeJS.Timeout | undefined
+        const abort = () => {
+          child.kill('SIGTERM')
+          forceTimer = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+          }, 2000)
+        }
+        this.abortHandler = abort
+        child.once('close', () => {
+          if (forceTimer) clearTimeout(forceTimer)
+          signal.removeEventListener('abort', abort)
+        })
+        if (signal.aborted) abort()
+        else signal.addEventListener('abort', abort, { once: true })
       }
 
       child.stdout?.setEncoding('utf8')
@@ -173,15 +185,14 @@ export class PythonWorker {
     if (this.abortHandler) {
       this.abortHandler = undefined
     }
-    if (this.child && this.child.exitCode === null) {
+    if (this.child && this.child.exitCode === null && this.child.signalCode === null) {
       const child = this.child
       await new Promise<void>((resolve) => {
-        child.once('close', () => resolve())
-        child.kill('SIGTERM')
-        setTimeout(() => {
-          if (child.exitCode === null) child.kill('SIGKILL')
-          resolve()
+        const timer = setTimeout(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
         }, 2000)
+        child.once('close', () => { clearTimeout(timer); resolve() })
+        child.kill('SIGTERM')
       })
     }
     this.child = undefined

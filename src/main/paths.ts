@@ -72,6 +72,8 @@ export function pythonDir(): string {
  */
 export function managedBallModelPath(): string {
   const app = electronApp()
+  const bundled = join(pythonDir(), 'track', 'models', 'ball.onnx')
+  if (existsSync(bundled)) return bundled
   if (app?.isPackaged) return join(app.getPath('userData'), 'models', 'ball.onnx')
   return join(resourceRoot(), 'python', 'track', 'models', 'ball.onnx')
 }
@@ -90,6 +92,9 @@ export function workerScriptPath(): string {
  */
 export function pythonInterpreterPath(): string {
   if (process.env.TRYBUNX_PYTHON) return process.env.TRYBUNX_PYTHON
+
+  const bundled = join(resourceRoot(), 'runtime', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  if (existsSync(bundled)) return bundled
 
   for (const venvDir of ['python/.venv', '.venv']) {
     const python = venvPython(join(resolve(process.cwd()), venvDir))

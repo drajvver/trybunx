@@ -5,10 +5,12 @@
  *
  * Ground truth is written next to the video as <name>.truth.json.
  */
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir, writeFile, mkdtemp, rm } from 'fs/promises'
 import { existsSync } from 'fs'
-import { resolve } from 'path'
-import { runProcess } from '../src/main/media/process'
+import { resolve, join } from 'path'
+import { runProcess, resolveBinary } from '../src/main/media/process'
+import { pythonInterpreterPath } from '../src/main/paths'
+import { tmpdir } from 'os'
 
 export const DURATION_S = 330
 export const WIDTH = 1280
@@ -22,27 +24,21 @@ export const GOALS = [
   { goalTime: 300, updateAt: 304, score: '2 - 1' }
 ]
 
-const FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-
-function scoreTexts(): string[] {
-  const bounds = [0, ...GOALS.map((g) => g.updateAt), DURATION_S + 1]
-  const texts = ['0 - 0', ...GOALS.map((g) => g.score)]
-  const filters: string[] = []
-  for (let i = 0; i < texts.length; i++) {
-    const from = bounds[i]
-    const to = bounds[i + 1]
-    const enable =
-      i === 0
-        ? `lt(t,${to})`
-        : i === texts.length - 1
-          ? `gte(t,${from})`
-          : `between(t,${from},${to})`
-    filters.push(
-      `drawtext=fontfile=${FONT}:text='${texts[i]}':fontcolor=white:fontsize=44:` +
-        `x=28:y=30:box=1:boxcolor=black:boxborderw=14:enable='${enable}'`
-    )
-  }
-  return filters
+async function scoreboardImages(directory: string): Promise<string[]> {
+  const paths = ['0 - 0', ...GOALS.map((g) => g.score)].map((_, i) => join(directory, `score_${i}.png`))
+  await runProcess(pythonInterpreterPath(), ['-c', `
+import json, sys
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+fonts = ['/System/Library/Fonts/Supplemental/Arial.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'C:/Windows/Fonts/arial.ttf']
+font_path = next((f for f in fonts if Path(f).exists()), None)
+font = ImageFont.truetype(font_path, 44) if font_path else ImageFont.load_default(size=44)
+for text, path in zip(json.loads(sys.argv[1]), json.loads(sys.argv[2])):
+    image = Image.new('RGB', (300, 64), 'black')
+    ImageDraw.Draw(image).text((12, 4), text, font=font, fill='white')
+    image.save(path)
+`, JSON.stringify(['0 - 0', ...GOALS.map((g) => g.score)]), JSON.stringify(paths)])
+  return paths
 }
 
 function audioFilter(): string {
@@ -108,26 +104,32 @@ export async function makeSyntheticMatch(outPath: string, force = false): Promis
   if (existsSync(outPath) && !force) return
   await mkdir(resolve(outPath, '..'), { recursive: true })
 
-  const vf = [
-    'drawbox=x=16:y=16:w=300:h=64:color=black@0.9:t=fill',
-    ...scoreTexts()
-  ].join(',')
-
-  await runProcess(
-    'ffmpeg',
-    [
-      '-y', '-hide_banner', '-loglevel', 'error',
-      '-f', 'lavfi', '-i', `color=c=0x1e6b34:s=${WIDTH}x${HEIGHT}:r=${FPS}:d=${DURATION_S}`,
-      '-f', 'lavfi', '-i', `anoisesrc=color=pink:amplitude=0.5:duration=${DURATION_S}:seed=42`,
-      '-vf', vf,
-      '-af', audioFilter(),
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '96k',
-      '-shortest',
-      `${outPath}.noball.mp4`
-    ],
-    { timeoutSeconds: 600 }
-  )
+  // PNG overlays avoid requiring FFmpeg's optional drawtext filter or a Linux-only font.
+  const directory = await mkdtemp(join(tmpdir(), 'trybunx-scoreboard-'))
+  try {
+    const images = await scoreboardImages(directory)
+    const bounds = [0, ...GOALS.map((g) => g.updateAt), DURATION_S + 1]
+    const filters = images.map((_, i) =>
+      `[${i === 0 ? '0:v' : `score${i - 1}`}][${i + 2}:v]overlay=16:16:enable='gte(t,${bounds[i]})*lt(t,${bounds[i + 1]})'[score${i}]`
+    ).join(';')
+    await runProcess(
+      resolveBinary('ffmpeg'),
+      [
+        '-y', '-hide_banner', '-loglevel', 'error',
+        '-f', 'lavfi', '-i', `color=c=0x1e6b34:s=${WIDTH}x${HEIGHT}:r=${FPS}:d=${DURATION_S}`,
+        '-f', 'lavfi', '-i', `anoisesrc=color=pink:amplitude=0.5:duration=${DURATION_S}:seed=42`,
+        ...images.flatMap((path) => ['-loop', '1', '-i', path]),
+        '-filter_complex', filters, '-map', '[score3]', '-map', '1:a',
+        '-af', audioFilter(), '-t', String(DURATION_S),
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '96k',
+        `${outPath}.noball.mp4`
+      ],
+      { timeoutSeconds: 600 }
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 
   // Second pass overlays the trackable ball. (One pass with ~700 drawbox
   // filters trips an FFmpeg filtergraph limit on some builds, and the ball
@@ -142,7 +144,7 @@ export async function makeSyntheticMatch(outPath: string, force = false): Promis
     const next = c * CHUNK_S + CHUNK_S >= DURATION_S ? outPath : `${outPath}.ball${c}.mp4`
     if (chunkFilters) {
       await runProcess(
-        'ffmpeg',
+        resolveBinary('ffmpeg'),
         [
           '-y', '-hide_banner', '-loglevel', 'error',
           '-i', chained,

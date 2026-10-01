@@ -266,7 +266,7 @@ input:focus {
 .settings-fields {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .setting-field {
@@ -419,3 +419,52 @@ input:focus {
   max-height: 260px;
   overflow: auto;
 }
+
+.roi-numeric {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+.roi-numeric legend { color: var(--muted); padding: 0 6px; }
+.roi-numeric label { display: flex; flex-direction: column; gap: 6px; }
+.roi-numeric input {
+  width: 120px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 8px;
+}
+.roi-numeric:disabled { opacity: 0.6; }
+button:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.setting-field { align-content: start; }
+.setting-help { display: grid; gap: 6px; }
+.setting-help small { line-height: 1.5; }
+.setting-help strong { color: var(--text); font-weight: 500; }
+.settings-fields > .toggle-setting,
+.settings-fields > .hint { grid-column: 1 / -1; }
+.settings-fields > .hint { margin: 0; }
+.toggle-setting input { flex-shrink: 0; }
+.roi-numeric .row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: start;
+}
+.roi-field { display: grid; gap: 6px; }
+.roi-field input { width: 100%; }
+.roi-field small { color: var(--muted); line-height: 1.5; }
+.analysis-summary {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 1fr;
+  gap: 8px 16px;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 6px;
+}
+.analysis-summary dt { color: var(--muted); }
+.analysis-summary dd { margin: 0; }

@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import { resourceRoot } from '../paths'
 
 export interface RunOptions {
   /** AbortSignal to cancel the process (SIGTERM, then SIGKILL). */
@@ -46,8 +47,37 @@ export function resolveBinary(name: string): string {
   const fromEnv = process.env[envKey]
   if (fromEnv) return fromEnv
 
+  const bundled = join(resourceRoot(), 'bin', process.platform === 'win32' ? `${name}.exe` : name)
+  if (existsSync(bundled)) return bundled
+
   const fallback = BINARY_FALLBACK_DIRS.map((dir) => join(dir, name)).find((p) => existsSync(p))
   return fallback ?? name
+}
+
+/** Attach cancellation and timeout once; always remove listeners and timers on exit. */
+function processLifetime(child: ReturnType<typeof spawn>, opts: RunOptions): { cancelled: () => boolean; cleanup: () => void } {
+  let cancelled = false
+  let forceTimer: NodeJS.Timeout | undefined
+  let timeout: NodeJS.Timeout | undefined
+  const kill = () => {
+    if (cancelled || child.exitCode !== null || child.signalCode !== null) return
+    cancelled = true
+    child.kill('SIGTERM')
+    forceTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    }, 2000)
+  }
+  if (opts.signal?.aborted) kill()
+  else opts.signal?.addEventListener('abort', kill, { once: true })
+  if (opts.timeoutSeconds) timeout = setTimeout(kill, opts.timeoutSeconds * 1000)
+  return {
+    cancelled: () => cancelled,
+    cleanup: () => {
+      opts.signal?.removeEventListener('abort', kill)
+      if (forceTimer) clearTimeout(forceTimer)
+      if (timeout) clearTimeout(timeout)
+    }
+  }
 }
 
 /** Run a process to completion, collecting stderr. Rejects on non-zero exit or cancellation. */
@@ -57,32 +87,14 @@ export function runProcess(
   opts: RunOptions = {}
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
+    const child = spawn(cmd, args, { windowsHide: true,
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let stdout = ''
     let stderr = ''
-    let cancelled = false
     let settled = false
-
-    const kill = () => {
-      cancelled = true
-      child.kill('SIGTERM')
-      setTimeout(() => {
-        if (!child.killed) child.kill('SIGKILL')
-      }, 2000)
-    }
-
-    if (opts.signal) {
-      if (opts.signal.aborted) kill()
-      else opts.signal.addEventListener('abort', kill, { once: true })
-    }
-
-    let timer: NodeJS.Timeout | undefined
-    if (opts.timeoutSeconds) {
-      timer = setTimeout(kill, opts.timeoutSeconds * 1000)
-    }
+    const lifetime = processLifetime(child, opts)
 
     child.stdout.on('data', (d: Buffer) => {
       stdout += d.toString()
@@ -96,14 +108,14 @@ export function runProcess(
     child.on('error', (err) => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
-      reject(new ProcessError(`Failed to start ${cmd}: ${err.message}`, null, stderr, cancelled))
+      lifetime.cleanup()
+      reject(new ProcessError(`Failed to start ${cmd}: ${err.message}`, null, stderr, lifetime.cancelled()))
     })
     child.on('close', (code) => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
-      if (opts.signal?.aborted || cancelled) {
+      lifetime.cleanup()
+      if (opts.signal?.aborted || lifetime.cancelled()) {
         reject(new ProcessError(`${cmd} cancelled`, code, stderr, true))
       } else if (code !== 0) {
         const tail = stderr.split('\n').slice(-12).join('\n')
@@ -125,7 +137,7 @@ export function spawnProcess(
   handlers: { onStdoutLine?: (line: string) => void; onStderr?: (chunk: string) => void },
   opts: RunOptions = {}
 ): { child: ReturnType<typeof spawn>; done: Promise<void> } {
-  const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn(cmd, args, { windowsHide: true, cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] })
   let buffer = ''
   child.stdout.on('data', (d: Buffer) => {
     buffer += d.toString()
@@ -139,25 +151,18 @@ export function spawnProcess(
   child.stderr.on('data', (d: Buffer) => handlers.onStderr?.(d.toString()))
   const done = new Promise<void>((resolve, reject) => {
     let settled = false
-    const kill = () => {
-      child.kill('SIGTERM')
-      setTimeout(() => {
-        if (!child.killed) child.kill('SIGKILL')
-      }, 2000)
-    }
-    if (opts.signal) {
-      if (opts.signal.aborted) kill()
-      else opts.signal.addEventListener('abort', kill, { once: true })
-    }
+    const lifetime = processLifetime(child, opts)
     child.on('error', (err) => {
       if (settled) return
       settled = true
+      lifetime.cleanup()
       reject(new ProcessError(`Failed to start ${cmd}: ${err.message}`, null, '', false))
     })
     child.on('close', (code) => {
       if (settled) return
       settled = true
-      if (opts.signal?.aborted) reject(new ProcessError(`${cmd} cancelled`, code, '', true))
+      lifetime.cleanup()
+      if (opts.signal?.aborted || lifetime.cancelled()) reject(new ProcessError(`${cmd} cancelled`, code, '', true))
       else if (code !== 0) reject(new ProcessError(`${cmd} exited with code ${code}`, code, '', false))
       else resolve()
     })

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { userError } from '../errors'
 import type { Roi } from '../../../shared/contracts'
 
 interface Props {
@@ -19,26 +20,38 @@ export function RoiEditor({ inputPath, frameTime, roi, onRoiChange }: Props): JS
   const [error, setError] = useState<string | null>(null)
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const dragging = useRef(false)
+  const requestId = useRef(0)
+  const [loadedSource, setLoadedSource] = useState('')
+  const source = `${inputPath}:${frameTime}`
+  const ready = !!frame && !loading && loadedSource === source
 
   const loadFrame = useCallback(async () => {
-    if (!inputPath) return
+    const request = ++requestId.current
+    setFrame(null)
+    setDrag(null)
+    dragging.current = false
+    if (!inputPath) { setLoading(false); return }
     setLoading(true)
     setError(null)
     try {
       const img = await window.clipHunter.getFrameImage(inputPath, frameTime)
+      if (request !== requestId.current) return
+      if (!img) throw new Error('Nie udało się pokazać tego momentu nagrania. Wybierz inny czas i spróbuj ponownie.')
       setFrame(img)
+      setLoadedSource(`${inputPath}:${frameTime}`)
     } catch (err) {
-      setError((err as Error).message)
+      if (request === requestId.current) setError(userError(err, 'Nie udało się pokazać tego momentu nagrania. Wybierz inny czas i spróbuj ponownie.'))
     } finally {
-      setLoading(false)
+      if (request === requestId.current) setLoading(false)
     }
   }, [inputPath, frameTime])
 
   useEffect(() => {
     void loadFrame()
+    return () => { requestId.current++ }
   }, [loadFrame])
 
-  const toNormalized = (e: React.MouseEvent): { x: number; y: number } => {
+  const toNormalized = (e: React.PointerEvent): { x: number; y: number } => {
     const rect = containerRef.current!.getBoundingClientRect()
     return {
       x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
@@ -75,14 +88,14 @@ export function RoiEditor({ inputPath, frameTime, roi, onRoiChange }: Props): JS
     <div className="roi-editor">
       <div className="roi-toolbar">
         <button onClick={() => void loadFrame()} disabled={!inputPath || loading}>
-          {loading ? 'Wczytywanie klatki…' : 'Wczytaj klatkę ponownie'}
+          {loading ? 'Wczytywanie podglądu…' : 'Odśwież podgląd'}
         </button>
         <span className="hint">
-          Zaznacz prostokąt wokół wyniku (zwykle w lewym górnym rogu kadru)
+          Przeciągnij myszą wokół liczb z wynikiem obu drużyn. Pomiń zegar meczu i logo stacji.
         </span>
         {roi && (
           <button className="secondary" onClick={() => onRoiChange(null)}>
-            Wyczyść obszar
+            Usuń zaznaczenie
           </button>
         )}
       </div>
@@ -92,18 +105,22 @@ export function RoiEditor({ inputPath, frameTime, roi, onRoiChange }: Props): JS
       <div
         ref={containerRef}
         className="frame-container"
-        onMouseDown={(e) => {
-          if (!frame) return
+        style={{ touchAction: 'none' }}
+        aria-busy={loading}
+        onPointerCancel={() => { dragging.current = false; setDrag(null) }}
+        onPointerDown={(e) => {
+          if (!ready || e.button !== 0) return
+          e.currentTarget.setPointerCapture(e.pointerId)
           const p = toNormalized(e)
           dragging.current = true
           setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
         }}
-        onMouseMove={(e) => {
+        onPointerMove={(e) => {
           if (!dragging.current || !drag) return
           const p = toNormalized(e)
           setDrag({ ...drag, x1: p.x, y1: p.y })
         }}
-        onMouseUp={() => {
+        onPointerUp={() => {
           if (!dragging.current || !drag) return
           dragging.current = false
           const x = Math.min(drag.x0, drag.x1)
@@ -116,24 +133,51 @@ export function RoiEditor({ inputPath, frameTime, roi, onRoiChange }: Props): JS
           }
         }}
       >
-        {frame ? (
-          <img src={frame.dataUrl} alt="Klatka nagrania" draggable={false} />
+        {ready ? (
+          <img src={frame!.dataUrl} alt="Podgląd wybranego momentu nagrania" draggable={false} />
         ) : (
-          <div className="frame-placeholder">Wybierz nagranie VOD, aby wczytać klatkę</div>
+          <div className="frame-placeholder">{loading ? 'Wczytywanie podglądu…' : 'Najpierw wybierz nagranie meczu. Tutaj pojawi się jego podgląd.'}</div>
         )}
         {rect && <div className="roi-rect" style={rect} />}
       </div>
 
+      <fieldset disabled={!ready} className="roi-numeric">
+        <legend>Możesz też ustawić zaznaczenie, wpisując liczby</legend>
+        <p className="hint">Wartości są podane jako procent szerokości lub wysokości obrazu. Na przykład szerokość 25% obejmuje jedną czwartą obrazu. Obszar nie może wyjść poza obraz.</p>
+        <div className="row">
+          {(['x', 'y', 'width', 'height'] as const).map((field) => (
+            <div className="roi-field" key={field}>
+              <label htmlFor={`roi-${field}`}>
+                {{ x: 'Odległość od lewej krawędzi (%)', y: 'Odległość od góry obrazu (%)', width: 'Szerokość zaznaczenia (%)', height: 'Wysokość zaznaczenia (%)' }[field]}
+              </label>
+              <input id={`roi-${field}`} aria-describedby={`roi-${field}-help`} type="number" min={field === 'width' || field === 'height' ? 1 : 0} max={100} step={0.1}
+                value={Math.round((roi ?? { x: 0, y: 0, width: 0.25, height: 0.1 })[field] * 1000) / 10}
+                onChange={(event) => {
+                  const next = { ...(roi ?? { x: 0, y: 0, width: 0.25, height: 0.1 }), [field]: Number(event.target.value) / 100 }
+                  next.x = Math.max(0, Math.min(0.99, next.x))
+                  next.y = Math.max(0, Math.min(0.99, next.y))
+                  next.width = Math.max(0.01, Math.min(1 - next.x, next.width))
+                  next.height = Math.max(0.01, Math.min(1 - next.y, next.height))
+                  onRoiChange(next)
+                }} />
+              <small id={`roi-${field}-help`}>
+                {{
+                  x: 'Zwiększ: przesuń zaznaczenie w prawo. Zmniejsz: przesuń je w lewo.',
+                  y: 'Zwiększ: przesuń zaznaczenie w dół. Zmniejsz: przesuń je w górę.',
+                  width: 'Zwiększ: obejmij szerszy fragment. Zmniejsz: zawęź zaznaczenie do liczb wyniku.',
+                  height: 'Zwiększ: obejmij wyższy fragment. Zmniejsz: ogranicz zaznaczenie do liczb wyniku.'
+                }[field]}
+              </small>
+            </div>
+          ))}
+          {!roi && <button onClick={() => onRoiChange({ x: 0, y: 0, width: 0.25, height: 0.1 })}>Dodaj zaznaczenie</button>}
+        </div>
+      </fieldset>
       {roi && (
         <div className="roi-values">
-          Obszar (znormalizowany): x={roi.x.toFixed(3)} y={roi.y.toFixed(3)} szer.={roi.width.toFixed(3)} wys.=
-          {roi.height.toFixed(3)}
+          Zaznaczenie obejmuje {(roi.width * 100).toLocaleString('pl-PL', { maximumFractionDigits: 1 })}% szerokości i {(roi.height * 100).toLocaleString('pl-PL', { maximumFractionDigits: 1 })}% wysokości obrazu.
           {frame && (
-            <span>
-              {' '}
-              ({Math.round(roi.x * frame.width)},{Math.round(roi.y * frame.height)}{' '}
-              {Math.round(roi.width * frame.width)}x{Math.round(roi.height * frame.height)} px)
-            </span>
+            <span> Rozmiar zaznaczenia: {Math.round(roi.width * frame.width)}x{Math.round(roi.height * frame.height)} punktów obrazu.</span>
           )}
         </div>
       )}

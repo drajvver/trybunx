@@ -11,6 +11,10 @@ describe('config', () => {
 
   it('rejects nonsensical values', () => {
     expect(() => resolveConfig({ clips: { max_clip_seconds: 0 } })).toThrow()
+    expect(() => resolveConfig({ clips: { max_clip_seconds: NaN } })).toThrow()
+    expect(() => resolveConfig({ clips: { goal_pre_roll_seconds: -1 } })).toThrow()
+    expect(() => resolveConfig({ audio: null })).toThrow()
+    expect(() => resolveConfig({ vertical: { ball_trust: '0.5' } })).toThrow()
     expect(() => resolveConfig({ clips: { encoding: 'flac' } })).toThrow()
     expect(() => resolveConfig({ ocr: { engine: 'magic' } })).toThrow()
     expect(() => resolveConfig({ ocr: { provider: 'cuda' } })).toThrow()

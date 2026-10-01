@@ -1,6 +1,6 @@
 import { existsSync } from 'fs'
 import { mkdir, rm, writeFile } from 'fs/promises'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, delimiter, dirname, join, resolve } from 'path'
 import {
   AnalysisResult,
   AudioWindow,
@@ -80,8 +80,8 @@ function workerEnvironment(vendorCandidates: string[], pythonEnv?: NodeJS.Proces
   const env: NodeJS.ProcessEnv = { ...pythonEnv }
   const vendorDirs = vendorCandidates.filter((dir) => existsSync(dir))
   if (vendorDirs.length > 0) {
-    const extra = vendorDirs.join(':')
-    env.PYTHONPATH = env.PYTHONPATH ? `${extra}:${env.PYTHONPATH}` : extra
+    const extra = vendorDirs.join(delimiter)
+    env.PYTHONPATH = env.PYTHONPATH ? `${extra}${delimiter}${env.PYTHONPATH}` : extra
   }
   return env
 }
@@ -228,7 +228,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
         if (signal?.aborted) throw err
         degraded.push('audio_analysis_failed')
         logger.error(`Audio analysis failed: ${(err as Error).message}; continuing OCR-only`)
-        stage('audio_analysis', 'failed', undefined, (err as Error).message)
+        stage('audio_analysis', 'failed', undefined, 'Nie udało się przeanalizować dźwięku. Analiza jest oparta na wyniku.')
       }
     } else {
       degraded.push('audio_analysis_skipped')
@@ -288,7 +288,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
               `[${info.startSeconds.toFixed(2)}s -> ${info.endSeconds.toFixed(2)}s]`,
             event.event_time
           )
-          stage('generate_clips', 'running', index / clipEvents.length, `clip ${index}/${clipEvents.length}`)
+          stage('generate_clips', 'running', index / clipEvents.length, `Klip ${index}/${clipEvents.length}`)
         },
         onClipFailed: (event, _index, error) => {
           degraded.push(`clip_failed:${event.id}`)
@@ -305,7 +305,7 @@ export async function runAnalysis(opts: AnalyzeOptions): Promise<AnalysisResult>
             event.event_time
           )
           if (info.tracking?.fallback) degraded.push(`vertical_center_fallback:${event.id}`)
-          stage('generate_clips', 'running', index / clipEvents.length, `vertical ${index}/${clipEvents.length}`)
+          stage('generate_clips', 'running', index / clipEvents.length, `Klip pionowy ${index}/${clipEvents.length}`)
         },
         onVerticalFailed: (event, _index, error) => {
           degraded.push(`vertical_failed:${event.id}`)
