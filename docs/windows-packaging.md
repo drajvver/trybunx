@@ -6,7 +6,7 @@ Gotowe pliki są dostępne w sekcji Releases repozytorium:
 - `Trybunx-0.2.0-windows-x64.zip` — aplikacja bez instalatora. Rozpakuj **cały** ZIP do zwykłego folderu, a następnie uruchom `TrybunaTV AI Clip Hunter.exe`. Zachowaj pozostałe pliki i folder `resources` obok aplikacji.
 - `SHA256SUMS.txt` — sumy kontrolne plików.
 
-Wymagany jest Windows 10/11, 64-bitowy procesor Intel lub AMD. Pakiet zawiera własny Python, biblioteki OCR/ONNX, modele rozpoznawania wyniku i śledzenia akcji oraz FFmpeg/FFprobe. Standardowa analiza działa bez instalowania osobnych narzędzi i bez pobierania modeli przy pierwszym użyciu. Obliczenia działają na procesorze; karta NVIDIA nie jest wymagana. Opcjonalny, techniczny tryb Tesseract wymaga osobnej instalacji Tesseract; nie jest domyślnie używany.
+Wymagany jest Windows 10/11, 64-bitowy procesor Intel lub AMD. Pakiet zawiera własny Python, biblioteki Visual C++ i OCR/ONNX, modele rozpoznawania wyniku i śledzenia akcji oraz FFmpeg/FFprobe. Standardowa analiza działa bez instalowania osobnych narzędzi i bez pobierania modeli przy pierwszym użyciu. Obliczenia działają na procesorze; karta NVIDIA nie jest wymagana. Opcjonalny, techniczny tryb Tesseract wymaga osobnej instalacji Tesseract; nie jest domyślnie używany.
 
 Wyniki analizy trafiają do folderu `Dokumenty/TrybunaTV`. Wersja ZIP korzysta z tych samych ustawień użytkownika co wersja instalowana; nie przechowuje ustawień wewnątrz folderu aplikacji.
 
@@ -14,7 +14,7 @@ Instalator nie ma podpisu cyfrowego. Windows może wyświetlić ostrzeżenie o n
 
 ## Budowanie przez programistę
 
-Na Windows x64 z Node.js 22 i `uv`:
+Na Windows x64 z Node.js 22, `uv` i Visual Studio 2022 z narzędziami C++:
 
 ```powershell
 npm ci

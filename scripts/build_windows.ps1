@@ -27,6 +27,18 @@ $PythonRoot = Split-Path $Python -Parent
 Copy-Item $PythonRoot "$Stage/runtime" -Recurse
 $BundledPython = "$Stage/runtime/python.exe"
 Run $BundledPython @("-c", "import struct; assert struct.calcsize('P') == 8")
+# ONNX/OpenCV need the C++ runtime too. Ship app-local redistributable DLLs
+# instead of relying on the build runner's globally installed runtime.
+$VsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+if (-not (Test-Path $VsWhere)) { throw "Visual Studio C++ redistributable files are required to build." }
+$VsRoot = (& $VsWhere -latest -products '*' -property installationPath).Trim()
+$Crt = Get-ChildItem "$VsRoot/VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT" -Directory |
+    Sort-Object FullName -Descending | Select-Object -First 1
+if (-not $Crt) { throw "x64 Visual C++ runtime redistributable directory not found" }
+Copy-Item "$($Crt.FullName)/*.dll" "$Stage/runtime/" -Force
+"Microsoft Visual C++ runtime: https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files" |
+    Set-Content "$Stage/licenses/Visual-Cpp-runtime.txt"
+
 Copy-Item python/worker.py "$Stage/python/"
 Copy-Item python/ocr, python/track "$Stage/python/" -Recurse
 Get-ChildItem "$Stage/python" -Directory -Recurse -Filter __pycache__ | Remove-Item -Recurse -Force

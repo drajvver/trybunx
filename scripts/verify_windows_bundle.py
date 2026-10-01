@@ -25,6 +25,9 @@ def main() -> None:
                             str(relocated), "--child"], env=env, cwd=temp, check=True, timeout=300)
         return
 
+    for name in ["msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll"]:
+        assert (root / "runtime" / name).is_file(), f"Missing app-local runtime: {name}"
+
     # Fail any attempted Python download, even if the machine is online.
     import socket
     def offline(*args, **kwargs):
